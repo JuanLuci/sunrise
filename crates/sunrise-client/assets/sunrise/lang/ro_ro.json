@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vedere",
   "sunrise.studio.topbar.view_short": "Vedere",
   "sunrise.studio.unknown_server": "Necunoscut",
-  "sunrise.tempban.dedicated_required": "Banurile temporare necesită un server dedicat",
-  "sunrise.tempban.invalid_duration": "%s nu este o durată: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Există %s banuri temporare:",
-  "sunrise.tempban.list.empty": "Nu există banuri temporare",
-  "sunrise.tempban.list.entry": "%1$s a fost banat de %2$s %3$s (până la %4$s)",
-  "sunrise.tempban.success": "%1$s pentru %2$s, până la %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Nu este afiliat cu Mojang sau Microsoft"
 }

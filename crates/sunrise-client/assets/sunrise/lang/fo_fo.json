@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Útsýni",
   "sunrise.studio.topbar.view_short": "Útsýni",
   "sunrise.studio.unknown_server": "Ókendur",
-  "sunrise.tempban.dedicated_required": "Fyribilsbann tørva ein serambætara",
-  "sunrise.tempban.invalid_duration": "%s er ikki ein tíðarlongd: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Tað eru %s fyribilsbann:",
-  "sunrise.tempban.list.empty": "Tað eru ongin fyribilsbann",
-  "sunrise.tempban.list.entry": "%1$s varð bannaður av %2$s %3$s (til %4$s)",
-  "sunrise.tempban.success": "%1$s í %2$s, til %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ikki tilknýtt Mojang ella Microsoft"
 }

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Xem",
   "sunrise.studio.topbar.view_short": "Xem",
   "sunrise.studio.unknown_server": "Không rõ",
-  "sunrise.tempban.dedicated_required": "Cấm tạm thời cần máy chủ chuyên dụng",
-  "sunrise.tempban.invalid_duration": "%s không phải khoảng thời gian: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Có %s lệnh cấm tạm thời:",
-  "sunrise.tempban.list.empty": "Không có lệnh cấm tạm thời nào",
-  "sunrise.tempban.list.entry": "%1$s đã bị %2$s cấm %3$s (đến %4$s)",
-  "sunrise.tempban.success": "%1$s trong %2$s, đến %3$s",
-  "sunrise.tempban.usage": "/tempban <người chơi> <thời gian> [lý do]",
   "sunrise.title.not_affiliated": "Không liên kết với Mojang hoặc Microsoft"
 }

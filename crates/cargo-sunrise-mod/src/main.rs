@@ -101,7 +101,8 @@ fn main() -> ExitCode {
             None => Ok(()),
         }),
         Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
-            .and_then(|()| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>()))
+            .and_then(|()| pinned_surface(Path::new(".")))
+            .and_then(|api| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>(), api.as_ref()))
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
@@ -177,6 +178,15 @@ fn fetched(dir: &Path) -> Result<(), String> {
         sdk.dir.display()
     );
     Ok(())
+}
+
+/// The surface of the SDK the project pins, read once for everything that packs a library's
+/// wire identities; none for a project built against the game checkout, which exports its own.
+fn pinned_surface(dir: &Path) -> Result<Option<mod_surface::Surface>, String> {
+    if sdk_fetch::game_tree(dir)?.is_some() {
+        return Ok(None);
+    }
+    uses_table::surface_of(&sdk_fetch::ensure_sdk(dir)?).map(Some)
 }
 
 /// The value after `flag` in `args`.
@@ -410,9 +420,13 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
+    let mut api = None;
     let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
-        match uses_table::scan(entry, root, &uses_table::surface_of(&sdk)?)? {
+        let surface = uses_table::surface_of(&sdk)?;
+        let scanned = uses_table::scan(entry, root, &surface)?;
+        api = Some(surface);
+        match scanned {
             uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
             uses_table::Scanned::Exact(_) => None,
             uses_table::Scanned::Unread(why) => {
@@ -426,17 +440,27 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     } else {
         None
     };
-    pack_into(root, &root.join("target/sunrise-mod"), uses.as_deref())
+    pack_into(
+        root,
+        &root.join("target/sunrise-mod"),
+        uses.as_deref(),
+        api.as_ref(),
+    )
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/sunrise-mod"), None)
+    pack_into(root, &root.join("target/sunrise-mod"), None, None)
 }
 
-fn pack_into(root: &Path, dir: &Path, uses: Option<&[u8]>) -> Result<PathBuf, String> {
+fn pack_into(
+    root: &Path,
+    dir: &Path,
+    uses: Option<&[u8]>,
+    api: Option<&mod_surface::Surface>,
+) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
-        layouts::build(root)?;
+        layouts::build(root, api)?;
     }
     let bytes = Package::pack_directory_with(root, uses)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

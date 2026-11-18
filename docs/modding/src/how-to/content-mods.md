@@ -241,7 +241,23 @@ covers stay hidden unless it also sets `occludes`.
 of the blocks beside it are drawn, so a thin panel or a block drawn by its block entity on a full-cube template
 doesn't leave a hole in the floor under it. It is not a solid render either, so light passes it as it passes
 leaves: dampened by 1, or not at all if skylight passes down; special template light rules remain inherited.
-Unset or `true` preserves the template's ability to occlude, using the declared outline when one is supplied.
+`occludes: true` occludes whatever the template does, using the declared outline when supplied, otherwise the
+template's published occlusion shape. A full shape is a solid render with light dampening 15; a partial or empty
+shape is not. Unset preserves the template's ability to occlude. Skylight-down and special template light rules
+remain inherited. Partial declared outlines retain the existing directional shape-light occlusion rule.
+
+`offset` takes `NONE`, `XZ` or `XYZ` (`OffsetType` in native and wasm drafts).
+`NONE` disables an inherited offset. `XZ` jitters horizontally; `XYZ` also moves downward.
+An explicit mode defaults to maximum horizontal displacement 0.25 and, for `XYZ`, maximum downward
+displacement 0.2. Optional `max_horizontal_offset` (finite 0 to 0.25) and `max_vertical_offset`
+(finite 0 to 0.2) set these limits; `XZ` ignores the vertical limit. Without `offset`, the template's
+mode and default limits are inherited, and supplied maxima adjust that mode without enabling one.
+
+The model and **declared** outline, collision and interaction shapes follow the same column seed
+(`BlockState.getOffset`, x and z only), including declared entity-context variants. Shape caches stay
+block-local; the position is applied at query time. The occlusion cache uses the outline after applying
+its column offset at `(0, 0, 0)`, as vanilla's state cache does.
+This works on both sides and does not require a hook.
 
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
@@ -443,10 +459,12 @@ This differs from NeoForge, where `getShape` is asked for on every query: here a
 **published when it changes, not asked for per query**, and a port of a `getShape` override calls
 `set_shapes` wherever that state changes (a part attached, a lid opened). Physics, selection,
 ray casts (outline and collider, over a dynamic template's shape too), support, the floor a
-mob's path stands on and its move control's jump read the published value at the position;
-nothing calls into the mod.
+mob's path stands on, its move control's jump, the height of an evoker's fangs, a panicking mob's
+search for water and whether a summoned iron golem can stand there read the published value at
+the position; nothing calls into the mod.
 Face sturdiness and multiface attachment between neighbouring blocks (placement, survival,
 shape updates, as for lichen and sculk veins) read the published collision shape at the position too.
+The sturdy floor an evoker's fangs look for under them still reads the declared shape.
 Fluid passage reads it as well: water and lava pass between two cells by their collision shapes at
 their positions. A publish, a clear and an aborted publish (the old shapes put back) each notify the
 block's neighbours, so a fluid beside it reads the new shape; publishing an unchanged value notifies nothing.
@@ -902,6 +920,11 @@ The fence: files go in the mod's own namespaces (`assets/<id>/`,
 (`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
 share (`data/c/tags/`), and sources added to vanilla's atlases
 (`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
+Packages of every kind may also add to the declared [`sunrise:` extension tags](extension-tags.md),
+by writing exactly the listed registry and tag path under `data/sunrise/tags/`.
+Other `data/sunrise/` and all `assets/sunrise/` files remain refused; the namespace cannot be claimed.
+Generated `sunrise:class/*` tags are refused by name: attach a part with `block_part_tag` instead.
+The SDK surface's `extension_tags` lists these same declarations, and `sdk diff` treats a removed tag as breaking.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under

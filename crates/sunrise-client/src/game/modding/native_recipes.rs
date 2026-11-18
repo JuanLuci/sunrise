@@ -180,10 +180,13 @@ impl Game<'_> {
                     recipes.recipe(id),
                     Some(sunrise_client::crafting::Recipe::Mod(_))
                 ) {
-                    recipes
-                        .mod_remainders_rect(id, grid, size, w, h, &|s| self.crafting_remainder(s))
+                    recipes.mod_remainders_rect(&self.loop_context, id, grid, size, w, h, &|s| {
+                        self.crafting_remainder(s)
+                    })
                 } else {
-                    recipes.remainders(id, grid, size, &|s| self.crafting_remainder(s))
+                    recipes.remainders(&self.loop_context, id, grid, size, &|s| {
+                        self.crafting_remainder(s)
+                    })
                 };
                 let remainders = (0..w * h)
                     .map(|i| placed[at(i)].take().try_into_api().map_err(|_| InvalidItem))

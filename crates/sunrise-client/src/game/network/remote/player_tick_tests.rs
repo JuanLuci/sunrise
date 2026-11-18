@@ -293,7 +293,7 @@ fn client_player_ticks_on_the_death_screen_too() {
             ));
             game.cooldowns.add("minecraft:ender_pearl".into(), 3);
             game.sleep_timer = 4;
-            // LocalPlayer.tick waits for the client load and its chunk: only
+            // LocalPlayer.tick waits for the client load: only
             // the other player's pair runs, and the level pass still ticks.
             game.tick_remote().unwrap();
             // Player.tick owns both counters, so they wait with it.

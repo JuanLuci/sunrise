@@ -17,7 +17,7 @@ run-name: ${{ inputs.kind == 'snapshot' && format('snapshot build {0}', inputs.b
 # - This file, game-build.yml and every script below run from main's copy: every dispatch names --ref main, and
 #   `uses: ./…` takes the caller's commit. A picked pull request's own .github/ is never read.
 # - `build` (game-build.yml, `trusted: false`) never reaches a release's tools: its macOS jobs run on the runner
-#   that already runs pull requests' parity jobs, never the release runner; its Rust cache has its own key and is
+#   that also runs by-hand game tools, never the release runner; its Rust cache has its own key and is
 #   never saved; and releases don't read the machine's shared sccache.
 # - `build` (game-build.yml) checks out and compiles the merge with no secrets: its token reads contents only and
 #   isn't kept in the checkout; the macOS programs are signed ad hoc (Developer ID needs the runner's keychain,
@@ -70,7 +70,11 @@ on:
         type: string
         default: ''
       base:
-        description: The commit of main to build on (default main's newest with green checks; on Sunrise main's head with its dyna-checks gate green)
+        description: The commit of main to build on (default main's newest with green checks; on Sunrise the `daily-green` commit with its dyna-checks gate green)
+        type: string
+        default: ''
+      exception:
+        description: The owner's one-time grant to publish a `base` (its full SHA) that is not daily-green (who, when, why); empty otherwise
         type: string
         default: ''
       urgent:
@@ -91,13 +95,14 @@ jobs:
     # `resolve`, so it never queues behind GitHub's runners (the Nightly of 2026-11-16 waited there from 15:34).
     # Signing and publishing below stay on GitHub's runners.
     runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && 'dyna-small' || 'ubuntu-latest' }}
-    # Room for building sunrise-release-sign, which checks the SDK's signature below.
-    timeout-minutes: 20
+    # Room for building sunrise-release-sign, which checks the SDK's signature below, and for a real run's wait on its
+    # commit's gate, run again when the next push cancelled it (GATE_RERUN, tools/release_train.py gate_again).
+    timeout-minutes: 170
     permissions:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
       issues: write         # says in the thread when the picked pull requests conflict
       pull-requests: write
-      actions: read         # main's newest green checks and parity-main runs (the base)
+      actions: write        # main's newest green checks (the base), and running a cancelled gate again
     outputs:
       build: ${{ steps.pick.outputs.build }}
       sha: ${{ steps.pick.outputs.sha }}
@@ -124,9 +129,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCE: ${{ (inputs.force || steps.mode.outputs.dry_run == 'true') && 'yes' || '' }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          # A real run (a hand `-f base=<sha>` too) runs its commit's gate again if the next push cancelled it.
+          GATE_RERUN: ${{ steps.mode.outputs.dry_run != 'true' && '1' || '' }}
           NIGHTLY_ISSUE: ${{ inputs.issue }}
           NIGHTLY_PRS: ${{ inputs.prs }}
           NIGHTLY_BASE: ${{ inputs.base }}
+          NIGHTLY_EXCEPTION: ${{ inputs.exception }}
           NIGHTLY_URGENT: ${{ inputs.urgent }}
           KIND: ${{ inputs.kind }}
         run: |
@@ -346,7 +354,8 @@ jobs:
           SOURCE_TAG: ${{ needs.pick.outputs.source_tag }}
         run: |
           set -euo pipefail
-          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
+          # Never a Nightly without its SDK (sdk-<sha>, published first): refused here before anything rotates.
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           python3 tools/ci/nightly.py rotate
           signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
           [[ -f dist/SHA256SUMS.v2.sig ]] && signature+=(dist/SHA256SUMS.v2.sig)
@@ -368,7 +377,7 @@ jobs:
           fi
           # A pre-release, never GitHub's latest: the latest stays the last vX.Y.Z, which launchers and servers from
           # before the Nightly-only switch keep (they don't read Nightlies).
-          if [[ -f dist/sdk.json ]]; then python3 tools/ci/nightly.py require-sdk "$SHA"; fi
+          python3 tools/ci/nightly.py require-sdk "$SHA"
           macos=()
           for archive in dist/sunrise-macos-arm64.zip dist/sunrise-macos-x64.zip; do
             if [[ -f "$archive" ]]; then macos+=("$archive"); fi

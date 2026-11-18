@@ -35,6 +35,8 @@ pub struct ServerAdvancements {
 /// recipes were unlocked) and ClientboundUpdateAdvancementsPacket's.
 pub struct FirstTick {
     pub recipe_book_add: Option<Vec<u8>>,
+    /// The recipes the completed advancements reward: `recipe_book_add` holds their displays.
+    pub recipes: Vec<String>,
     pub update_advancements: Vec<u8>,
     pub granted: Vec<CriterionGrant>,
 }
@@ -201,6 +203,7 @@ impl ServerAdvancements {
         }
         // AdvancementRewards.grant: the recipes, in the advancements' order.
         let mut entries = Vec::new();
+        let mut recipes = Vec::new();
         for (i, a) in self.tree.list.iter().enumerate() {
             if !done[i] {
                 continue;
@@ -209,6 +212,7 @@ impl ServerAdvancements {
             for id in &a.rewards.recipes {
                 entries.extend(self.book_entries(id, sync, NOTIFY_AND_HIGHLIGHT));
             }
+            recipes.extend_from_slice(&a.rewards.recipes);
         }
         let recipe_book_add = (!entries.is_empty()).then(|| book_add(entries, false));
         // flushDirty: every advancement the player may see, and its progress.
@@ -230,6 +234,7 @@ impl ServerAdvancements {
         w.bool(true); // show the advancements
         FirstTick {
             recipe_book_add,
+            recipes,
             update_advancements: w.data,
             granted,
         }
@@ -918,6 +923,43 @@ fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> Option<i32>) {
             }
         }
         _ => w.varint(1),
+    }
+}
+
+#[cfg(test)]
+impl ServerAdvancements {
+    /// `test:tick`, whose one `minecraft:tick` criterion rewards `rewarded`, beside the
+    /// recipes `others` no advancement rewards: each a shapeless recipe of stone.
+    pub(crate) fn tick_rewarding(rewarded: &str, others: &[&str]) -> Self {
+        use crate::advancements::{Advancement, Criterion, Rewards};
+        let mut tree = Tree::default();
+        tree.list.push(Advancement {
+            id: "test:tick".into(),
+            parent: None,
+            display: None,
+            criteria: vec![Criterion {
+                name: "tick".into(),
+                trigger: "minecraft:tick".into(),
+                conditions: Value::Null.into(),
+            }],
+            requirements: vec![vec!["tick".into()]],
+            rewards: Rewards {
+                recipes: vec![rewarded.into()],
+                ..Default::default()
+            },
+        });
+        let recipe: Box<str> = r#"{"type":"minecraft:crafting_shapeless","ingredients":[["minecraft:stone"]],"result":{"id":"minecraft:diamond"}}"#.into();
+        let recipes: BTreeMap<String, Box<str>> = std::iter::once(rewarded)
+            .chain(others.iter().copied())
+            .map(|id| (id.to_owned(), recipe.clone()))
+            .collect();
+        let mut advancements = SyncData::empty().advancements;
+        advancements.kids = tree.children();
+        advancements.layout = tree.layout();
+        advancements.tree = std::sync::Arc::new(tree);
+        advancements.displays = RecipeIndex::from_serialized(&recipes);
+        advancements.recipes = recipes;
+        advancements
     }
 }
 

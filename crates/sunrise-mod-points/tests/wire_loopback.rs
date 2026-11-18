@@ -36,7 +36,7 @@ fn tail(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
 
 struct Loopback(u32);
 impl Forward for Loopback {
-    fn forward(&self, id: u32, host: PointHost<'_>, record: &mut dyn Record) {
+    fn forward(&self, id: u64, host: PointHost<'_>, record: &mut dyn Record) {
         let mut input = Writer::new();
         input.put(&self.0);
         if let PointHost::Side(side) = host {
@@ -46,7 +46,7 @@ impl Forward for Loopback {
     }
 }
 
-fn loopback(id: u32, mut input: Writer, record: &mut dyn Record) {
+fn loopback(id: u64, mut input: Writer, record: &mut dyn Record) {
     record.encode(&mut input);
     let pointer = mod_api::wire::guest::input(input.bytes().len());
     // SAFETY: input() reserves this many writable bytes until run().
@@ -59,8 +59,8 @@ fn loopback(id: u32, mut input: Writer, record: &mut dyn Record) {
     let reply = unsafe { std::slice::from_raw_parts(pointer, len as usize) };
     let mut reply = Reader::new(reply);
     reply.take::<()>().unwrap();
-    let top = id == 0x8000_0000 + PointId::GameServerLinksListTop as u32;
-    let top_return = id == 0x8000_0000 + PointId::GameServerLinksListTopReturn as u32;
+    let top = id == PointId::GameServerLinksListTop.id();
+    let top_return = id == PointId::GameServerLinksListTopReturn.id();
     if (top && BAD_HEAD.swap(false, Ordering::Relaxed))
         || (top_return && BAD_RETURN.swap(false, Ordering::Relaxed))
     {
@@ -119,8 +119,8 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
     assert_eq!(
         mod_points::guest::subscriptions(),
         [
-            (PointId::Tick as u32, "head".into()),
-            (PointId::TickReturn as u32, "return".into())
+            (PointId::Tick.name().to_owned(), "head".into()),
+            (PointId::TickReturn.name().to_owned(), "return".into())
         ]
     );
     for (place, endpoint) in [
@@ -131,7 +131,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
             "guest",
             place.place(),
             endpoint,
-            0x8000_0000 + place as u32,
+            place.id(),
         ))
         .unwrap();
     }
@@ -154,7 +154,7 @@ fn head_and_return_share_the_hook_arena_and_native_listener_list() {
             "guest",
             place.place(),
             endpoint,
-            0x8000_0000 + place as u32,
+            place.id(),
         ))
         .unwrap();
     }

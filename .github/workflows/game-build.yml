@@ -57,8 +57,7 @@ jobs:
     needs: runner-configuration
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
     # goes to the Mac mini's nightly runner (macOS + sunrise-nightly: ludovics-mac-mini-nightly, beside the one that
-    # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
-    # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
+    # runs by-hand game tools), never the release runner (MAC_RUNNER: ludovics-mac-mini-release).
     # toJSON keeps an empty trusted runner as an invalid empty label, never a Nightly fallback.
     runs-on: ${{ fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_EXPORTERS_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"ubuntu-latest"') }}
     # Three full preparations (two isolated, one batched) besides the compile.
@@ -116,7 +115,7 @@ jobs:
           # prepares afresh.
           cargo build --release --locked -p sunrise-prepare
           preparer="${CARGO_TARGET_DIR:-target}/release/sunrise-prepare"
-          # Compiled here, never taken from the runner's shared preparations: pull requests' parity jobs
+          # Compiled here, never taken from the runner's shared preparations: other game jobs
           # write those (vanilla-data.sh links .local/exporters to them).
           rm -rf .local/exporters
           bundle=$("$preparer" compile-exporters --root "$PWD" | tail -1)

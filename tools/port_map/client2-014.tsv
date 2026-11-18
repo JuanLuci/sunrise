@@ -77,7 +77,7 @@ LoadingOverlay.extractRenderState	port	crates/sunrise-client/src/game.rs::Game::
 LoadingOverlay.tick	port	crates/sunrise-client/src/game/world/server_packs.rs::Game::tick_server_packs	finishes the reload; gap: minor: no fade-out before it finishes
 LoadingOverlay.isReadyToFadeOut	missing		minor: no one-second fade-in before the reload can finish
 LoadingOverlay.extractProgressBar	port	crates/sunrise-client-render/src/level_loading.rs::draw_progress	200 by 2 bar; gap: minor: no fade alpha
-LoadingOverlay.LogoTexture.loadContents	skip:other		Sunrise ships no Mojang logo (title_edition.rs)
+LoadingOverlay.LogoTexture.loadContents	skip:other		Sunrise ships no Mojang logo
 ManageServerScreen.init	port	crates/sunrise-client/src/multiplayer.rs::Screen::buttons	name and address fields, resource packs cycle, Done and Cancel (Screen::Edit arm)
 ManageServerScreen.resize	skip:ui		layout only; Screen::Edit keeps its fields
 ManageServerScreen.onAdd	port	crates/sunrise-client/src/multiplayer.rs::Screen::click	Done saves the name (default if empty) and the address

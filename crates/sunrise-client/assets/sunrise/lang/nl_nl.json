@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Beeld",
   "sunrise.studio.topbar.view_short": "Beeld",
   "sunrise.studio.unknown_server": "Onbekend",
-  "sunrise.tempban.dedicated_required": "Tijdelijke bans vereisen een dedicated server",
-  "sunrise.tempban.invalid_duration": "%s is geen duur: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Er zijn %s tijdelijke ban(s):",
-  "sunrise.tempban.list.empty": "Er zijn geen tijdelijke bans",
-  "sunrise.tempban.list.entry": "%1$s is door %2$s verbannen, %3$s (tot %4$s)",
-  "sunrise.tempban.success": "%1$s voor %2$s, tot %3$s",
-  "sunrise.tempban.usage": "/tempban <speler> <duur> [reden]",
   "sunrise.title.not_affiliated": "Niet aangesloten bij Mojang of Microsoft"
 }

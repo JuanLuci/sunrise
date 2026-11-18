@@ -214,6 +214,14 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
     for r in &surface.capabilities {
         put(&r.id, &r.hash, json(&r.contract), Map::new());
     }
+    for tag in &surface.extension_tags {
+        put(
+            &format!("extension_tag:{}/{}", tag.registry, tag.id),
+            &crate::contract_hash(&(&tag.registry, &tag.id)),
+            json(&(&tag.registry, &tag.id)),
+            Map::new(),
+        );
+    }
     for r in &surface.behaviours {
         // A behaviour's hash holds nothing: its version is all the diff compares.
         let mut view = json(&r.contract);

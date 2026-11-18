@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Görünüm",
   "sunrise.studio.topbar.view_short": "Görünüm",
   "sunrise.studio.unknown_server": "Bilinmiyor",
-  "sunrise.tempban.dedicated_required": "Geçici yasaklar özel sunucu gerektirir",
-  "sunrise.tempban.invalid_duration": "%s bir süre değil: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s geçici yasak var:",
-  "sunrise.tempban.list.empty": "Geçici yasak yok",
-  "sunrise.tempban.list.entry": "%1$s, %2$s tarafından %3$s yasaklandı (%4$s tarihine kadar)",
-  "sunrise.tempban.success": "%1$s, %2$s süresince, %3$s tarihine kadar",
-  "sunrise.tempban.usage": "/tempban <oyuncu> <süre> [neden]",
   "sunrise.title.not_affiliated": "Mojang veya Microsoft ile bağlantılı değildir"
 }

@@ -187,6 +187,7 @@ impl LoadContext {
             side,
             snapshot: self.snapshot.clone(),
             recipe_properties: Default::default(),
+            item_tags: None,
         }
     }
 
@@ -202,6 +203,7 @@ impl LoadContext {
             side,
             snapshot: Snapshot::capture(self.snapshot.inputs.clone(), mod_ids),
             recipe_properties: Default::default(),
+            item_tags: None,
         }
     }
 
@@ -248,8 +250,11 @@ pub struct LoopContext {
     side: LoopSide,
     snapshot: Snapshot,
     recipe_properties: Arc<HashMap<String, std::collections::HashSet<String>>>,
+    item_tags: Option<Arc<item_tags::ItemTags>>,
 }
 
+#[path = "native_load_context/item_tags.rs"]
+mod item_tags;
 #[path = "native_load_context/recipe_properties.rs"]
 mod recipe_properties;
 
@@ -785,6 +790,7 @@ mod tests {
                 settings: shared_settings(settings),
             },
             recipe_properties: Default::default(),
+            item_tags: None,
         };
         fs::write(root.join("reader/value"), "after").unwrap();
         fs::write(root.join("reader/later-invalid"), [0xff]).unwrap();

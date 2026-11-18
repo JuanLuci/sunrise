@@ -1,0 +1,499 @@
+//! Switching an owner off holds scheduled work and prevents template writes.
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        Dim, Game, Hit,
+        api_values::{TryIntoApi, TryIntoEngine},
+        native_entity_refs::tests as fixture,
+    };
+    use mod_api::{
+        BlockPart, BlockToolModificationEvent, DispenseMethodEvent, Dispensed, Flow, Hooks, Host,
+        LevelWriteHost, Registrar, RegistrationContext, ServerHost, TickBlockEvent, ToolAbility,
+        ToolModifiedStateEvent,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use sunrise_client::{chunk::Chunk, items::ItemStack};
+    use sunrise_core::{geometry::Direction, position::BlockPos, ticks::TickPriority};
+    use sunrise_world::{
+        level::{BlockMaps, Landing, LevelAccess},
+        registry::BlockStateId,
+    };
+
+    const POS: BlockPos = BlockPos::new(3, 64, 5);
+
+    #[derive(Default)]
+    struct ToolProbe {
+        candidates: Vec<(ToolAbility, Option<BlockStateId>)>,
+        replacement: Option<mod_api::BlockState>,
+    }
+
+    #[derive(Default)]
+    struct Probe {
+        owner_ticks: AtomicUsize,
+        earlier_ticks: AtomicUsize,
+        earlier_dispenses: AtomicUsize,
+        tool: Mutex<ToolProbe>,
+    }
+
+    struct Earlier(Arc<Probe>);
+    #[mod_api::sunrise_part]
+    impl BlockPart for Earlier {
+        fn tick_block(&self, _: &mut dyn LevelWriteHost, _: &mut TickBlockEvent) -> Flow {
+            self.0.earlier_ticks.fetch_add(1, Ordering::Relaxed);
+            Flow::Cancel
+        }
+        fn dispense_method(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut DispenseMethodEvent<'_>,
+        ) -> Option<Dispensed> {
+            self.0.earlier_dispenses.fetch_add(1, Ordering::Relaxed);
+            let mut remainder = event.stack.clone();
+            remainder
+                .set_count(if remainder.count() == 3 { 65 } else { 2 })
+                .unwrap();
+            Some((Some(remainder), 0))
+        }
+    }
+    struct EnabledPrefix(Arc<Probe>);
+    #[mod_api::__subscriptions]
+    impl Hooks for EnabledPrefix {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let block = r.block_key("inert_test:machine");
+            r.block_part(block, Earlier(self.0.clone()));
+        }
+    }
+
+    struct Machine(Arc<Probe>);
+    #[mod_api::sunrise_part]
+    impl BlockPart for Machine {
+        fn tick_block(&self, _: &mut dyn LevelWriteHost, _: &mut TickBlockEvent) -> Flow {
+            self.0.owner_ticks.fetch_add(1, Ordering::Relaxed);
+            Flow::Cancel
+        }
+        fn dispense_method(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut DispenseMethodEvent<'_>,
+        ) -> Option<Dispensed> {
+            Some((Some(event.stack.clone()), 0))
+        }
+        fn tool_modified_state(&self, _: &dyn Host, _: &mut ToolModifiedStateEvent<'_>) -> Flow {
+            Flow::Continue
+        }
+    }
+    struct Survival;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Survival {
+        fn can_survive(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::CanSurviveEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
+    struct Plant;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Plant {
+        fn may_place_on(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::MayPlaceOnEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
+    struct Soil;
+    #[mod_api::sunrise_part]
+    impl BlockPart for Soil {
+        fn can_sustain_plant(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut mod_api::CanSustainPlantEvent,
+        ) -> Option<bool> {
+            Some(true)
+        }
+    }
+
+    struct Owner(Arc<Probe>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Owner {
+        fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            let block = r.block_key("inert_test:machine");
+            r.block_part(block, Machine(self.0.clone()));
+            let carpet = r.block_key("inert_test:carpet");
+            r.block_part(carpet, Survival);
+            let sand = r.block_key("inert_test:sand");
+            r.block_part(sand, Survival);
+            let plant = r.block_key("inert_test:plant");
+            r.block_part(plant, Plant);
+            let soil = r.block_key("inert_test:soil");
+            r.block_part(soil, Soil);
+        }
+        fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
+            e.blocks.push(
+                mod_api::Block::new("inert_test:machine", "minecraft:observer").with_item(false),
+            );
+            let mut carpet = mod_api::Block::new("inert_test:carpet", "minecraft:white_carpet");
+            carpet.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
+            e.blocks.push(carpet);
+            e.blocks
+                .push(mod_api::Block::new("inert_test:sand", "minecraft:sand"));
+            let mut plant = mod_api::Block::new("inert_test:plant", "minecraft:dandelion");
+            plant.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
+            e.blocks.push(plant);
+            e.blocks
+                .push(mod_api::Block::new("inert_test:soil", "minecraft:stone"));
+        }
+    }
+    struct Observer(Arc<Probe>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Observer {
+        fn block_tool_modification(
+            &self,
+            _: &dyn Host,
+            event: &mut BlockToolModificationEvent<'_>,
+        ) -> Flow {
+            let mut tool = self.0.tool.lock().unwrap();
+            tool.candidates.push((
+                event.tool.ability,
+                event
+                    .final_state
+                    .map(|state| state.try_into_engine(&()).unwrap()),
+            ));
+            if event.tool.ability == ToolAbility::AxeWaxOff
+                && let Some(replacement) = tool.replacement
+            {
+                *event.final_state = Some(replacement);
+            }
+            Flow::Continue
+        }
+    }
+
+    fn with_inert_block(name: &str, test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe)) {
+        let name = format!("game::disabled_block_tests::tests::{name}");
+        if fixture::run_fresh_cases(&name, "SUNRISE_INERT_BLOCK_CHILD", &["valid"]) {
+            return;
+        }
+        let probe = Arc::new(Probe::default());
+        let mods: mod_api::Mods = vec![
+            mod_api::ModEntry::new("enabled_prefix", Box::new(EnabledPrefix(probe.clone()))),
+            mod_api::ModEntry::new("inert_test", Box::new(Owner(probe.clone()))),
+            mod_api::ModEntry::new("enabled_observer", Box::new(Observer(probe.clone()))),
+        ]
+        .into();
+        mod_platform::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
+            mod_api::__private::mark_game_thread();
+            let base =
+                std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+            let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
+            fixture::with_game_at(root.prepared().to_owned(), |game| {
+                game.options.dedicated = Some(Vec::new());
+                game.native_level_opened(Dim::Overworld);
+                for x in -1..=1 {
+                    for z in -1..=1 {
+                        let mut chunk = Chunk::empty(x, z);
+                        chunk.lit = true;
+                        game.world.chunks.insert((x, z), Arc::new(chunk));
+                    }
+                }
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("inert_test:machine")
+                    .unwrap();
+                game.world.set(POS.x, POS.y, POS.z, state).unwrap();
+                test(game, state, &probe);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn reenabled_owner_resumes_held_scheduled_tick() {
+        with_inert_block(
+            "reenabled_owner_resumes_held_scheduled_tick",
+            |game, state, probe| {
+                game.tickets
+                    .update(Some(sunrise_client::ticket_levels::Sources {
+                        forced: vec![(0, 0)],
+                        ..Default::default()
+                    }));
+                game.with_level(|_, _, ticks| {
+                    ticks
+                        .add_chunk(POS.chunk(), Default::default(), Default::default())
+                        .unwrap();
+                });
+                let calls = || {
+                    [
+                        probe.earlier_ticks.load(Ordering::Relaxed),
+                        probe.owner_ticks.load(Ordering::Relaxed),
+                    ]
+                };
+                for stepped in [false, true] {
+                    let tick = |game: &mut Game<'_>| {
+                        if stepped {
+                            game.tick_scheduled().unwrap();
+                        } else {
+                            game.with_level(|b, level, ticks| b.tick_scheduled(level, ticks));
+                        }
+                        assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
+                    };
+                    for (part, prefix_enabled) in [true, false].into_iter().enumerate() {
+                        assert!(mod_api::__private::set_mod_enabled(
+                            "enabled_prefix",
+                            prefix_enabled
+                        ));
+                        let before = calls();
+                        game.with_level(|b, level, ticks| {
+                            ticks.schedule_block(
+                                level.game_time(),
+                                POS,
+                                b.block(state),
+                                0,
+                                TickPriority::High,
+                            );
+                        });
+                        assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                        for _ in 0..3 {
+                            tick(game);
+                            assert_eq!(calls(), before, "no Part runs while the owner is off");
+                        }
+                        assert!(mod_api::__private::set_mod_enabled("inert_test", true));
+                        let mut expected = before;
+                        expected[part] += 1;
+                        tick(game);
+                        assert_eq!(calls(), expected);
+                        tick(game);
+                        assert_eq!(calls(), expected, "the held tick runs exactly once");
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn disabled_blocks_survive_piston_pushes_without_authorizing_placement() {
+        with_inert_block(
+            "disabled_blocks_survive_piston_pushes_without_authorizing_placement",
+            |game, _, _| {
+                let base = BlockPos::new(3, 70, 5);
+                let registry = &game.pack.assets.registry;
+                let piston = registry
+                    .resolve(&sunrise_world::chunk::BlockState {
+                        name: "minecraft:piston".into(),
+                        properties: [
+                            ("facing".into(), "east".into()),
+                            ("extended".into(), "false".into()),
+                        ]
+                        .into(),
+                    })
+                    .unwrap();
+                let state = |name| registry.default_state(name).unwrap();
+                let moving = state("minecraft:moving_piston");
+                let redstone = state("minecraft:redstone_block");
+                let cases = [
+                    ("inert_test:carpet", "minecraft:stone", "minecraft:air"),
+                    ("inert_test:plant", "minecraft:dirt", "minecraft:stone"),
+                    ("inert_test:plant", "minecraft:dirt", "inert_test:soil"),
+                ]
+                .map(|(block, source, target)| {
+                    (target, state(block), state(source), state(target))
+                });
+                game.tickets
+                    .update(Some(sunrise_client::ticket_levels::Sources {
+                        forced: vec![(0, 0)],
+                        ..Default::default()
+                    }));
+                game.with_level(|b, level, ticks| {
+                    ticks.add_empty_chunk(base.chunk()).unwrap();
+                    assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                    for (i, (ground, carried, source_floor, dest_floor)) in
+                        cases.into_iter().enumerate()
+                    {
+                        let piston_pos = base.offset(0, 0, (i as i32) * 3);
+                        let start = piston_pos.offset(1, 0, 0);
+                        let end = piston_pos.offset(2, 0, 0);
+                        level.set_raw(piston_pos, piston).unwrap();
+                        level.set_raw(start.offset(0, -1, 0), source_floor).unwrap();
+                        if !b.is_air(dest_floor) {
+                            level.set_raw(end.offset(0, -1, 0), dest_floor).unwrap();
+                        }
+                        level.set_raw(start, carried).unwrap();
+                        assert!(b.can_survive(level, ticks, start, carried));
+                        assert!(
+                            !b.can_survive(level, ticks, end, carried),
+                            "new placement over {ground}"
+                        );
+                        b.set_block(level, ticks, piston_pos.offset(-1, 0, 0), redstone, 3);
+                        b.run_block_events(level, ticks);
+                        assert_eq!(b.block(level.block_state(end)), b.block(moving));
+                        for _ in 0..4 {
+                            b.tick_block_entities(level, ticks);
+                        }
+                        assert_eq!(
+                            level.block_state(end),
+                            carried,
+                            "the moved block must survive over {ground}"
+                        );
+                        assert!(!b.can_survive(level, ticks, start, carried));
+                    }
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn disabled_sand_survives_falling_entity_landing() {
+        with_inert_block(
+            "disabled_sand_survives_falling_entity_landing",
+            |game, _, _| {
+                let target = POS.offset(1, 0, 0);
+                let sand = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("inert_test:sand")
+                    .unwrap();
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.with_level(|b, level, ticks| {
+                    level.set_raw(target.offset(0, -1, 0), stone).unwrap();
+                    assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                    assert!(!b.can_survive(level, ticks, target, sand));
+                    assert_eq!(
+                        b.falling_block_landed(level, ticks, target, sand, false),
+                        Landing::Placed(sand)
+                    );
+                    assert_eq!(level.block_state(target), sand);
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn inert_dispense_keeps_a_legacy_over_max_stack_without_events() {
+        with_inert_block(
+            "inert_dispense_keeps_a_legacy_over_max_stack_without_events",
+            |game, _, _| {
+                assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
+                let dispenser = (POS.x - 1, POS.y, POS.z);
+                let stack = ItemStack::new("minecraft:stick", 65); // legal persisted count, above 64
+                game.audio.capture = Some(Vec::new());
+                let particles = game.particles.len();
+                assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                assert_eq!(
+                    game.dispense_item(dispenser, Direction::East, stack.clone())
+                        .unwrap(),
+                    Some(stack.clone())
+                );
+                assert!(game.dropped.is_empty());
+                assert!(game.audio.capture.as_ref().unwrap().is_empty());
+                assert_eq!(game.particles.len(), particles);
+
+                assert!(mod_api::__private::set_mod_enabled("inert_test", true));
+                let left = game
+                    .dispense_item(dispenser, Direction::East, stack)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    left.count, 64,
+                    "an enabled listener's over-max reply is still refused"
+                );
+                assert_eq!(game.dropped.len(), 1);
+                assert_eq!(game.dropped[0].stack, ItemStack::new("minecraft:stick", 1));
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn rejected_dispense_reply_preserves_the_disabled_owners_fallback() {
+        with_inert_block(
+            "rejected_dispense_reply_preserves_the_disabled_owners_fallback",
+            |game, _, probe| {
+                assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                let dispenser = (POS.x - 1, POS.y, POS.z);
+                game.audio.capture = Some(Vec::new());
+                let particles = game.particles.len();
+                for (input, remaining) in [(3, 3), (4, 2)] {
+                    assert_eq!(
+                        game.dispense_item(
+                            dispenser,
+                            Direction::East,
+                            ItemStack::new("minecraft:stick", input)
+                        )
+                        .unwrap(),
+                        Some(ItemStack::new("minecraft:stick", remaining))
+                    );
+                    assert!(game.dropped.is_empty());
+                    assert!(game.audio.capture.as_ref().unwrap().is_empty());
+                    assert_eq!(game.particles.len(), particles);
+                }
+                assert_eq!(probe.earlier_dispenses.load(Ordering::Relaxed), 2);
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn inert_tool_keeps_block_but_global_listener_sees_vanilla_candidate() {
+        with_inert_block(
+            "inert_tool_keeps_block_but_global_listener_sees_vanilla_candidate",
+            |game, state, probe| {
+                let registry = game.pack.assets.registry;
+                let candidate = registry.default_state("minecraft:observer").unwrap();
+                let replacement = registry
+                    .default_state("minecraft:stripped_oak_log")
+                    .unwrap();
+                let waxed = serde_json::json!({"waxed": "inert_test:machine"});
+                game.res
+                    .behaviours()
+                    .set_block_maps(Some(Arc::new(BlockMaps::from_values(
+                        [],
+                        [],
+                        [("minecraft:observer", &waxed)],
+                        |_| 0,
+                    ))));
+                let hit = Hit {
+                    pos: [POS.x, POS.y, POS.z],
+                    face: [0, 1, 0],
+                    point: [3.5, 65.0, 5.5],
+                    inside: false,
+                };
+                let axe = ItemStack::new("minecraft:iron_axe", 1);
+                let candidates = [
+                    (ToolAbility::AxeStrip, None),
+                    (ToolAbility::AxeScrape, None),
+                    (ToolAbility::AxeWaxOff, Some(candidate)),
+                ];
+                assert!(mod_api::__private::set_mod_enabled("inert_test", false));
+                assert!(!game.use_block_transformer(&axe, &hit).unwrap());
+                assert_eq!(game.world.block(POS.x, POS.y, POS.z), state);
+                {
+                    let mut tool = probe.tool.lock().unwrap();
+                    assert_eq!(std::mem::take(&mut tool.candidates), candidates);
+                    tool.replacement = Some(replacement.try_into_api().unwrap());
+                }
+                assert!(game.use_block_transformer(&axe, &hit).unwrap());
+                assert_eq!(game.world.block(POS.x, POS.y, POS.z), replacement);
+                assert_eq!(probe.tool.lock().unwrap().candidates, candidates);
+            },
+        );
+    }
+}

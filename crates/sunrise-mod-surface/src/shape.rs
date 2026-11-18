@@ -203,6 +203,13 @@ impl<'a> Shapes<'a> {
         Ok(text["type(".len()..text.len() - 1].to_owned())
     }
 
+    /// The shape of the type at `key` applied to `args`, which hold no type parameter of their
+    /// own: how a generic call or type is written for one instance.
+    pub fn applied(&mut self, key: &str, args: Vec<Shape>) -> Result<String, ShapeError> {
+        let text = self.named(key, args, &mut Vec::new())?;
+        Ok(text["type(".len()..text.len() - 1].to_owned())
+    }
+
     /// The type at `key` with `args`, which are resolved: a `Param` left in them is a parameter
     /// of the outermost type.
     fn named(
@@ -417,7 +424,7 @@ impl<'a> Shapes<'a> {
 }
 
 /// The first 128 bits of SHA-256 of `text`, as 32 lowercase hex digits.
-pub(crate) fn digest(text: &str) -> String {
+pub fn digest(text: &str) -> String {
     use sha2::{Digest, Sha256};
     let hash = Sha256::digest(text.as_bytes());
     let mut out = String::with_capacity(32);

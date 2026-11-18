@@ -14,7 +14,7 @@ use crate::{
 use glam::{DVec3, Quat, Vec3 as FVec3};
 use sunrise_assets::resource_source::ResourceSource;
 use sunrise_core::{
-    geometry::{Aabb, Axis, Vec3, trig},
+    geometry::{Aabb, Vec3, trig},
     random::{LegacyRandom, RandomSource},
 };
 use sunrise_world::block_collision::BlockCollisionRegistry;
@@ -1025,9 +1025,12 @@ impl<'a> ParticleLevel<'a> {
     /// `getCollisionShape(...).max(Y, x, z)` for cached shapes.
     fn collision_top(&self, b: [i32; 3], fx: f64, fz: f64) -> f64 {
         let state = self.block(b[0], b[1], b[2]);
-        match self.collision.cached_shapes().cached_shape(state) {
-            Ok(Some(shape)) if !shape.is_empty() => shape.max_at(Axis::Y, fx, fz),
-            Ok(Some(_)) => 0.0,
+        match self
+            .collision
+            .cached_shapes()
+            .cached_collision_top(state, b, fx, fz)
+        {
+            Ok(Some(top)) => top,
             _ if self.facts.get(state).full_collision => 1.0,
             _ => 0.0,
         }

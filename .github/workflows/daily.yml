@@ -66,6 +66,7 @@ jobs:
       commit: ${{ steps.commit.outputs.commit }}
       skip: ${{ steps.commit.outputs.skip }}
       dry_run: ${{ steps.commit.outputs.dry_run }}
+      parity_required: ${{ steps.commit.outputs.parity_required }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +97,14 @@ jobs:
               echo "### $sha already has a completed daily run: $done" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
-          { echo "commit=$sha"; echo "skip=$skip"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
+          # Every writing run, whichever commit of main it takes, runs parity: a writing run can move daily-green and
+          # start the Nightly, so none may skip it. Only a dry run, which writes nothing, has no parity leg.
+          parity_required=false
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY_RUN" = false ]; then
+            parity_required=true
+          fi
+          printf 'commit=%s\nskip=%s\ndry_run=%s\nparity_required=%s\n' \
+            "$sha" "$skip" "$DRY_RUN" "$parity_required" >> "$GITHUB_OUTPUT"
 
   shards:
     needs: resolve
@@ -114,9 +122,9 @@ jobs:
     with:
       commit: ${{ needs.resolve.outputs.commit }}
   # Against this run's own SDK (the sdk job's legs, or sdk-<sha> when that is already released), signed with a
-  # throwaway key that only the debug-assertions launcher it builds trusts. It waits for the sdk job for the legs, and
-  # runs when that job failed too: it reads only the Linux legs, so a macOS or Windows leg that failed (a macOS runner
-  # GitHub never assigned, 2026-11-16) leaves it something to check, and a missing Linux leg fails it by name.
+  # throwaway key that only the debug-assertions launcher it builds trusts. It reads only the Linux legs, so it waits
+  # for the sdk job (the Linux legs) alone, not for sdk-windows-macos: macOS finished 53 minutes after Linux in daily
+  # 44065326913. It runs when that job failed too, and a missing Linux leg fails it by name.
   fn-replace-check:
     needs: [resolve, sdk]
     if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
@@ -156,18 +164,43 @@ jobs:
       commit: ${{ needs.resolve.outputs.commit }}
   # The prebuilt SDK of this commit, built and smoked on every OS; its archives stay this run's artifacts until
   # sdk-publish releases them after a green summary (a red daily publishes no SDK, as it publishes no nightly).
+  # Two calls, the Linux legs and the others, so fn-replace-check needs only the first; both are named `sdk`, so the
+  # summary reads their jobs (`sdk / build windows`) as the one sdk leg.
   sdk:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
     uses: ./.github/workflows/prebuilt-game-build.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
+      legs: linux
+  sdk-windows-macos:
+    name: sdk
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    uses: ./.github/workflows/prebuilt-game-build.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+      legs: windows-macos
 
+  # Every automatic vanilla parity harness on this writing run's commit of main. Never on a rollup or a pull
+  # request (owner, 2026-11-17). After the test shards, so its large runner is never one of three
+  # beside them while gates wait. The summary requires this leg for the nightly and files its failures.
+  parity:
+    needs: [resolve, shards]
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' &&
+      needs.resolve.outputs.parity_required == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/parity.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
     # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.
     name: summary ${{ needs.resolve.outputs.commit }}${{ needs.resolve.outputs.dry_run == 'true' && ' (dry run)' || '' }}
-    needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, windows-runtime-leases, machine-sample, sdk]
+    needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, windows-runtime-leases, machine-sample, sdk,
+            sdk-windows-macos, parity]
     # Not on a cancelled run: its legs did not fail, they were stopped, and a stopped leg says nothing about the commit.
     if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
@@ -206,8 +239,8 @@ jobs:
   # then there is nothing to publish.
   # Gated on its own legs (summary sdk_green), not every leg, until a runner with prepared data exists (owner, 2026-11-16).
   sdk-publish:
-    needs: [resolve, summary, sdk]
-    if: "!cancelled() && needs.resolve.result == 'success' && needs.summary.result == 'success' && needs.sdk.result == 'success' && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'"
+    needs: [resolve, summary, sdk, sdk-windows-macos]
+    if: "!cancelled() && needs.resolve.result == 'success' && needs.summary.result == 'success' && needs.sdk.result == 'success' && needs.sdk-windows-macos.result == 'success' && needs.summary.outputs.sdk_green == 'true' && needs.resolve.outputs.dry_run == 'false' && needs.sdk.outputs.needed == 'true'"
     permissions:
       contents: write  # the sdk-<sha> release
     uses: ./.github/workflows/sdk-publish.yml

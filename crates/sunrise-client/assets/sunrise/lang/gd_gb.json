@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Sealladh",
   "sunrise.studio.topbar.view_short": "Sealladh",
   "sunrise.studio.unknown_server": "Gun fhios",
-  "sunrise.tempban.dedicated_required": "Feumaidh casaidean sealach frithealaiche sònraichte",
-  "sunrise.tempban.invalid_duration": "Chan eil %s na ùine: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Tha %s casg sealach ann:",
-  "sunrise.tempban.list.empty": "Chan eil casaidean sealach ann",
-  "sunrise.tempban.list.entry": "Chaidh %1$s a chasg le %2$s %3$s (gu %4$s)",
-  "sunrise.tempban.success": "%1$s airson %2$s, gu %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Gun a bhith ceangailte ri Mojang no Microsoft"
 }

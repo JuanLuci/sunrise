@@ -293,6 +293,201 @@ index fcf5a46..40c84a0 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
+diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
+index 55a9372..e11c750 100644
+--- a/crates/horizon-mixins-core/src/helpers.rs
++++ b/crates/horizon-mixins-core/src/helpers.rs
+@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
+ use syn::{
+     Expr, FnArg, Item, ReturnType, Type,
+     visit::{self, Visit},
++    visit_mut::{self, VisitMut},
+ };
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -82,13 +83,88 @@ pub fn return_type(sig: &syn::Signature) -> Type {
+         ReturnType::Type(_, ty) => *ty.clone(),
+     }
+ }
++/// A type's comparable text: the same type written with or without a trailing comma in a list
++/// (`Vec<T,>`, `fn(A,)`, `(A, B,)`) compares equal, as the compiler treats it. A one-element
++/// tuple keeps its comma, which is what makes it a tuple.
+ pub fn normalize_type(ty: &Type) -> String {
+-    tokens(ty)
+-        .replace(' ', "")
+-        .replace("::core::ops::", "")
+-        .replace("::std::ops::", "")
+-        .replace("core::ops::", "")
+-        .replace("std::ops::", "")
++    struct TrailingCommas;
++    impl VisitMut for TrailingCommas {
++        fn visit_angle_bracketed_generic_arguments_mut(
++            &mut self,
++            args: &mut syn::AngleBracketedGenericArguments,
++        ) {
++            args.args.pop_punct();
++            visit_mut::visit_angle_bracketed_generic_arguments_mut(self, args);
++        }
++        fn visit_parenthesized_generic_arguments_mut(
++            &mut self,
++            args: &mut syn::ParenthesizedGenericArguments,
++        ) {
++            args.inputs.pop_punct();
++            visit_mut::visit_parenthesized_generic_arguments_mut(self, args);
++        }
++        fn visit_type_bare_fn_mut(&mut self, f: &mut syn::TypeBareFn) {
++            if f.variadic.is_none() {
++                f.inputs.pop_punct();
++            }
++            visit_mut::visit_type_bare_fn_mut(self, f);
++        }
++        fn visit_type_tuple_mut(&mut self, tuple: &mut syn::TypeTuple) {
++            if tuple.elems.len() > 1 {
++                tuple.elems.pop_punct();
++            }
++            visit_mut::visit_type_tuple_mut(self, tuple);
++        }
++        fn visit_type_impl_trait_mut(&mut self, ty: &mut syn::TypeImplTrait) {
++            ty.bounds.pop_punct();
++            visit_mut::visit_type_impl_trait_mut(self, ty);
++        }
++        fn visit_type_trait_object_mut(&mut self, ty: &mut syn::TypeTraitObject) {
++            ty.bounds.pop_punct();
++            visit_mut::visit_type_trait_object_mut(self, ty);
++        }
++    }
++    let mut ty = ty.clone();
++    TrailingCommas.visit_type_mut(&mut ty);
++    // The printed tokens keep their separators, so path segments, token boundaries and literal
++    // contents all take part in the comparison.
++    tokens(&ty)
++}
++/// Whether a helper's return type is the cancellation contract's `ControlFlow<Output>`, which may
++/// be written `ControlFlow`, `core::ops::ControlFlow`, `::core::ops::ControlFlow` or the same
++/// through `std`. Only the outermost path takes these spellings; its arguments compare as types.
++fn same_cancellation_type(helper: &Type, contract: &Type) -> bool {
++    fn control_flow(ty: &Type) -> Option<&syn::PathSegment> {
++        let Type::Path(path) = ty else { return None };
++        if path.qself.is_some() {
++            return None;
++        }
++        let names: Vec<_> = path
++            .path
++            .segments
++            .iter()
++            .map(|s| s.ident.to_string())
++            .collect();
++        let names: Vec<_> = names.iter().map(String::as_str).collect();
++        match names.as_slice() {
++            ["ControlFlow"] | ["core" | "std", "ops", "ControlFlow"] => path.path.segments.last(),
++            _ => None,
++        }
++    }
++    match (control_flow(helper), control_flow(contract)) {
++        (Some(a), Some(b)) => {
++            normalize_type_arguments(&a.arguments) == normalize_type_arguments(&b.arguments)
++        }
++        _ => normalize_type(helper) == normalize_type(contract),
++    }
++}
++fn normalize_type_arguments(arguments: &syn::PathArguments) -> String {
++    let mut ty: Type = syn::parse_quote!(Probe);
++    let Type::Path(path) = &mut ty else {
++        unreachable!()
++    };
++    path.path.segments[0].arguments = arguments.clone();
++    normalize_type(&ty)
+ }
+ fn parse_type(text: &str) -> Result<Type> {
+     syn::parse_str(text).map_err(|e| Diagnostic::new("E_INVALID_BINDING", e.to_string()))
+@@ -385,9 +461,14 @@ pub fn validate_helper(
+         ));
+     }
+     // OVERWRITE retains the MVP's compiler-validated return compatibility.
++    let returned = return_type(&helper.sig);
++    let declared = parse_type(&contract.output)?;
+     if kind != Kind::Overwrite
+-        && normalize_type(&return_type(&helper.sig))
+-            != normalize_type(&parse_type(&contract.output)?)
++        && if cancellable {
++            !same_cancellation_type(&returned, &declared)
++        } else {
++            normalize_type(&returned) != normalize_type(&declared)
++        }
+     {
+         let why = if cancellable {
+             "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
+@@ -528,3 +609,70 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+         _ => false,
+     }
+ }
++
++#[cfg(test)]
++mod normalize_tests {
++    use super::normalize_type;
++
++    fn same(a: &str, b: &str) -> bool {
++        normalize_type(&syn::parse_str(a).unwrap()) == normalize_type(&syn::parse_str(b).unwrap())
++    }
++
++    #[test]
++    fn a_trailing_comma_in_a_list_does_not_change_the_type() {
++        assert!(same("Vec<T,>", "Vec<T>"));
++        assert!(same("HashMap<K, Option<V,>,>", "HashMap<K, Option<V>>"));
++        assert!(same("Box<dyn Fn(i32,) -> u8>", "Box<dyn Fn(i32) -> u8>"));
++        assert!(same("fn(i32, u8,) -> i32", "fn(i32, u8) -> i32"));
++        assert!(same("(i32, u8,)", "(i32, u8)"));
++        assert!(same("&mut Vec<&'static str,>", "&mut Vec<&'static str>"));
++    }
++
++    #[test]
++    fn distinct_types_stay_apart_whatever_commas_they_carry() {
++        // `std::ops::Range` is not a local `Range`: the path segments take part in the comparison.
++        assert!(!same("std::ops::Range<u8,>", "Range<u8>"));
++        assert!(!same("core::ops::Range<u8>", "Range<u8>"));
++        assert!(!same(
++            "crate::foo::core::ops::Tag<u8,>",
++            "crate::fooTag<u8>"
++        ));
++        assert!(same("std::ops::Range<u8,>", "std::ops::Range<u8>"));
++        // Token boundaries and literal contents are kept.
++        assert!(!same("Tag<{ \"a b\".len() },>", "Tag<{ \"ab\".len() }>"));
++        assert!(!same(
++            "Option<[u8; b\"a b\".len()],>",
++            "Option<[u8; b\"ab\".len()]>"
++        ));
++        assert!(same("Tag<{ \"a b\".len() },>", "Tag<{ \"a b\".len() }>"));
++    }
++
++    #[test]
++    fn the_cancellation_type_accepts_each_spelling_of_control_flow_only_at_the_top() {
++        let ty = |s: &str| syn::parse_str::<syn::Type>(s).unwrap();
++        let cancels = |a: &str, b: &str| super::same_cancellation_type(&ty(a), &ty(b));
++        let contract = "::core::ops::ControlFlow<Result<i32, E>>";
++        for spelling in [
++            "ControlFlow<Result<i32, E>>",
++            "core::ops::ControlFlow<Result<i32, E,>,>",
++            "::std::ops::ControlFlow<Result<i32, E>>",
++        ] {
++            assert!(cancels(spelling, contract), "{spelling}");
++        }
++        assert!(!cancels("ControlFlow<Result<i32, E>, bool>", contract));
++        assert!(!cancels("other::ControlFlow<Result<i32, E>>", contract));
++        assert!(!cancels(
++            "ControlFlow<std::ops::Range<u8>>",
++            "ControlFlow<Range<u8>>"
++        ));
++        // Outside the cancellation check, `ControlFlow` is an ordinary path.
++        assert!(!same("std::ops::ControlFlow<u8>", "ControlFlow<u8>"));
++    }
++
++    #[test]
++    fn a_one_element_tuple_keeps_its_comma_and_other_types_stay_apart() {
++        assert!(!same("(i32,)", "(i32)"));
++        assert!(!same("Vec<T>", "Vec<U>"));
++        assert!(!same("Option<Vec<T>>", "Vec<Option<T>>"));
++    }
++}
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
 index 848dcc0..153c68d 100644
 --- a/crates/horizon-mixins-core/src/plan.rs

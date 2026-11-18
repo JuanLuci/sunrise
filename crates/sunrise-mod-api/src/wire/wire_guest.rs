@@ -451,41 +451,135 @@ impl Drop for Reply {
     }
 }
 
-/// Calls the game's import `id` with `args` and returns its answer.
-pub fn host(id: u32, args: Writer) -> Reply {
+/// Marks one export as used: a call, on wasm, of a no-op import named `$name`. The module's
+/// import section then lists the hook, Part method or handler method; the link keeps the
+/// import exactly while the code that calls this is linked.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sunrise_import {
+    ($name:literal) => {{
+        #[cfg(target_arch = "wasm32")]
+        {
+            #[link(wasm_import_module = "sunrise")]
+            unsafe extern "C" {
+                #[link_name = $name]
+                fn mark();
+            }
+            // SAFETY: a no-op import of the game's table, which takes and returns nothing.
+            unsafe { mark() }
+        }
+    }};
+}
+
+/// Calls the game's import with `args` and returns its answer. `import` is the module's own
+/// import of that call, declared where it is called ([`__sunrise_host_call!`]).
+///
+/// # Safety
+/// `import` must be a call of the game's table: it writes at most `out_cap` bytes at `out_ptr`
+/// and returns the length of its answer, which the reply then takes as initialized.
+#[cfg(target_arch = "wasm32")]
+pub unsafe fn host_with(
+    import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
+    args: Writer,
+) -> Reply {
+    let mut out = reply_buffer();
+    // SAFETY: the caller's contract is this one.
+    unsafe { transport::call_with(import, args.bytes(), &mut out) };
+    RUNTIME.with(|rt| rt.borrow_mut().recycle(args.into_bytes()));
+    Reply(out)
+}
+
+/// Calls the game's call `name` with `args` and returns its answer: on a native build the
+/// game's side is the test's transport, which is told the call's name.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn host_named(name: &str, args: Writer) -> Reply {
+    let mut out = reply_buffer();
+    transport::call(name, args.bytes(), &mut out);
+    RUNTIME.with(|rt| rt.borrow_mut().recycle(args.into_bytes()));
+    Reply(out)
+}
+
+fn reply_buffer() -> Vec<u8> {
     let mut out = RUNTIME
         .with(|rt| rt.borrow_mut().spare.pop())
         .unwrap_or_default();
     out.clear();
     out.reserve(256);
-    transport::call(id, args.bytes(), &mut out);
-    RUNTIME.with(|rt| rt.borrow_mut().recycle(args.into_bytes()));
-    Reply(out)
+    out
+}
+
+/// Calls a game call with `args`: on wasm through the module's own import of it, which the call
+/// site declares (its name is the import's `link_name`, so the module lists exactly the calls
+/// its code keeps); natively through the test's transport, by name.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sunrise_host_call {
+    ($name:literal, $args:expr) => {{
+        // The caller's expression runs here, outside the unsafe block that authorises the import.
+        let args = $args;
+        #[cfg(target_arch = "wasm32")]
+        {
+            #[link(wasm_import_module = "sunrise")]
+            unsafe extern "C" {
+                #[link_name = $name]
+                fn import(in_ptr: *const u8, in_len: u32, out_ptr: *mut u8, out_cap: u32) -> u32;
+            }
+            // SAFETY: `import` is the game's call of this name, declared above.
+            unsafe {
+                $crate::wire::guest::host_with(
+                    |in_ptr, in_len, out_ptr, out_cap| import(in_ptr, in_len, out_ptr, out_cap),
+                    args,
+                )
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            $crate::wire::guest::host_named($name, args)
+        }
+    }};
+}
+
+/// Calls the import `import` with `input`, the answer appended to `out`; one that does not fit
+/// `out`'s spare capacity is kept by the game and copied by the shared `host_reply` import.
+///
+/// # Safety
+/// `import` must write at most the capacity it is given at the pointer it is given, and return
+/// the length of its answer, which `out` then takes as initialized.
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub unsafe fn call_with(
+    import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
+    input: &[u8],
+    out: &mut Vec<u8>,
+) {
+    // SAFETY: the caller's contract is this one.
+    unsafe { transport::call_with(import, input, out) }
 }
 
 #[cfg(target_arch = "wasm32")]
 mod transport {
-    #[link(wasm_import_module = "sunrise")]
-    unsafe extern "C" {
-        fn host(id: u32, in_ptr: *const u8, in_len: u32, out_ptr: *mut u8, out_cap: u32) -> u32;
-        fn host_reply(out_ptr: *mut u8);
-    }
-
-    pub(super) fn try_call(id: u32, input: &[u8], out: &mut Vec<u8>) -> bool {
-        call(id, input, out);
-        true
-    }
     /// Sends a panic's text to the game: every panic in this module is the guest's own.
     pub(super) fn try_log(input: &[u8]) -> bool {
-        try_call(crate::wire::HOST_LOG, input, &mut Vec::new())
+        super::generated::protocol::log(input, &mut Vec::new());
+        true
     }
-    pub(super) fn call(id: u32, input: &[u8], out: &mut Vec<u8>) {
+    /// Lets the game release a held object.
+    pub(super) fn release(input: &[u8]) {
+        super::generated::protocol::release(input, &mut Vec::new());
+    }
+    /// # Safety
+    /// `import` writes at most the capacity it is given at the pointer it is given, and returns
+    /// the length of its answer.
+    pub(super) unsafe fn call_with(
+        import: impl FnOnce(*const u8, u32, *mut u8, u32) -> u32,
+        input: &[u8],
+        out: &mut Vec<u8>,
+    ) {
         let cap = out.capacity();
         // SAFETY: the game writes at most `cap` bytes at `out`'s spare capacity, which it owns;
         // a longer answer is kept by the game and copied by `host_reply` into the grown buffer.
         unsafe {
-            let len = host(
-                id,
+            let len = import(
                 input.as_ptr(),
                 input.len() as u32,
                 out.as_mut_ptr(),
@@ -493,7 +587,7 @@ mod transport {
             ) as usize;
             if len > cap {
                 out.reserve(len);
-                host_reply(out.as_mut_ptr());
+                super::generated::protocol::host_reply(out.as_mut_ptr());
             }
             out.set_len(len);
         }
@@ -506,9 +600,9 @@ mod transport {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    /// Serves import `id` for `input`, returning its answer.
+    /// Serves the call named `name` for `input`, returning its answer.
     // no wire: process-local boundary service, not a value.
-    pub type Transport = Rc<dyn Fn(u32, &[u8]) -> Vec<u8>>;
+    pub type Transport = Rc<dyn Fn(&str, &[u8]) -> Vec<u8>>;
 
     thread_local!(static TRANSPORT: RefCell<Option<Transport>> = const { RefCell::new(None) });
 
@@ -526,7 +620,7 @@ mod transport {
         }
     }
 
-    pub(super) fn try_call(id: u32, input: &[u8], out: &mut Vec<u8>) -> bool {
+    pub(super) fn try_call(name: &str, input: &[u8], out: &mut Vec<u8>) -> bool {
         let transport = TRANSPORT
             .try_with(|t| t.try_borrow().ok().and_then(|t| t.clone()))
             .ok()
@@ -535,7 +629,7 @@ mod transport {
             return false;
         };
         let _serving = Serving(SERVING.with(|serving| serving.replace(true)));
-        out.extend_from_slice(&transport(id, input));
+        out.extend_from_slice(&transport(name, input));
         true
     }
     /// Sends a panic's text to the game, unless the panic is raised while the game answers this
@@ -543,10 +637,13 @@ mod transport {
     /// mid-call there, so it is printed instead (native harness only).
     pub(super) fn try_log(input: &[u8]) -> bool {
         !SERVING.try_with(std::cell::Cell::get).unwrap_or(true)
-            && try_call(crate::wire::HOST_LOG, input, &mut Vec::new())
+            && try_call(super::generated::protocol::LOG, input, &mut Vec::new())
     }
-    pub(super) fn call(id: u32, input: &[u8], out: &mut Vec<u8>) {
-        assert!(try_call(id, input, out), "no transport to the game is set");
+    pub(super) fn call(name: &str, input: &[u8], out: &mut Vec<u8>) {
+        assert!(
+            try_call(name, input, out),
+            "no transport to the game is set"
+        );
     }
 }
 
@@ -617,7 +714,10 @@ impl Drop for Held {
     fn drop(&mut self) {
         let mut args = begin();
         args.put(&self.0);
-        host(crate::wire::HOST_RELEASE, args);
+        #[cfg(target_arch = "wasm32")]
+        transport::release(args.bytes());
+        #[cfg(not(target_arch = "wasm32"))]
+        drop(host_named(generated::protocol::RELEASE, args));
     }
 }
 
@@ -636,15 +736,15 @@ pub fn input(len: usize) -> *mut u8 {
 
 /// A generated export table sharing the hook transport and call arena.
 // no wire: borrowed extension call context.
-pub type Extension = fn(u32, &mut Reader<'_>, &mut Writer) -> Result<(), WireError>;
+pub type Extension = fn(u64, &mut Reader<'_>, &mut Writer) -> Result<(), WireError>;
 
 thread_local! {
-    static EXTENSIONS: RefCell<Vec<(u32, u32, Extension)>> = const { RefCell::new(Vec::new()) };
+    static EXTENSIONS: RefCell<Vec<(u64, u64, Extension)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Installs a generated export table for ids matching `(id & mask) == base`.
 /// Called while the guest loads, before any of its listeners run.
-pub fn extend(base: u32, mask: u32, dispatch: Extension) {
+pub fn extend(base: u64, mask: u64, dispatch: Extension) {
     EXTENSIONS.with(|tables| {
         let mut tables = tables.borrow_mut();
         if let Some(table) = tables.iter_mut().find(|(b, m, _)| *b == base && *m == mask) {
@@ -655,7 +755,7 @@ pub fn extend(base: u32, mask: u32, dispatch: Extension) {
     });
 }
 
-fn dispatch(id: u32, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), WireError> {
+fn dispatch(id: u64, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), WireError> {
     let extension = EXTENSIONS.with(|tables| {
         tables
             .borrow()
@@ -679,7 +779,7 @@ pub fn resource_scope() -> crate::wire::ResourceScope {
 /// Runs export `id` on the input the game wrote and returns where its reply is: the pointer in
 /// the high half, the length in the low. A refused call answers `u32::MAX` as the length and
 /// its reason, as a string, at the pointer.
-pub fn run(id: u32) -> (*const u8, u32) {
+pub fn run(id: u64) -> (*const u8, u32) {
     static HOOK: std::sync::Once = std::sync::Once::new();
     // A trap says nothing about why: the game gets the panic's text first.
     HOOK.call_once(|| {
@@ -992,11 +1092,11 @@ mod tests {
     #[test]
     fn guest_pool_returns_nested_import_arguments_and_replies() {
         set_transport(Some(std::rc::Rc::new(|id, bytes| {
-            if id == 0 {
+            if id == "outer" {
                 assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 5);
                 let mut arguments = begin();
                 arguments.put(&37u32);
-                assert_eq!(host(1, arguments).take::<u32>().unwrap(), 99);
+                assert_eq!(host_named("inner", arguments).take::<u32>().unwrap(), 99);
             } else {
                 assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 37);
             }
@@ -1004,7 +1104,7 @@ mod tests {
         })));
         let mut arguments = begin();
         arguments.put(&5u32);
-        let reply = host(0, arguments);
+        let reply = host_named("outer", arguments);
         assert_eq!(reply.take::<u32>().unwrap(), 99);
         // The nested arguments and reply, plus outer arguments, have returned. The
         // outer answer still belongs to Reply and cannot be leased by another call.
@@ -1022,7 +1122,7 @@ mod tests {
         })));
         let mut arguments = begin();
         arguments.put_str(&"x".repeat(1024 * 1024 + 1));
-        let reply = host(0, arguments);
+        let reply = host_named("test", arguments);
         assert_eq!(reply.0, [7]);
         RUNTIME.with(|rt| assert!(rt.borrow().spare.is_empty()));
         drop(reply);
@@ -1030,7 +1130,7 @@ mod tests {
         set_transport(Some(std::rc::Rc::new(|_, _| vec![7; 1024 * 1024 + 1])));
         let mut arguments = begin();
         arguments.put(&5u32);
-        let reply = host(0, arguments);
+        let reply = host_named("test", arguments);
         assert_eq!(reply.0.len(), 1024 * 1024 + 1);
         drop(reply);
         RUNTIME.with(|rt| {
@@ -1046,19 +1146,13 @@ mod tests {
 mod entry {
     use super::*;
 
-    /// The layout of every value that crosses, which the game compares with its own.
-    #[unsafe(no_mangle)]
-    pub extern "C" fn sunrise_layout() -> u64 {
-        *crate::wire::LAYOUT
-    }
-
     #[unsafe(no_mangle)]
     pub extern "C" fn sunrise_in(len: u32) -> *mut u8 {
         input(len as usize)
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sunrise_hook(id: u32) -> u64 {
+    pub extern "C" fn sunrise_hook(id: u64) -> u64 {
         let (pointer, len) = run(id);
         (pointer as usize as u64) << 32 | u64::from(len)
     }

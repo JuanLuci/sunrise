@@ -208,7 +208,7 @@ pub fn generate(
     root: &Path,
     included: &[(&str, &str)],
 ) -> Result<(String, Vec<std::path::PathBuf>), String> {
-    let index = &mut Index::new(root, included);
+    let index = &mut crate::index::game(root, included);
     let declarations = key_declarations(index)?;
     let mut shapes = Vec::new();
     for (_, shape) in &declarations {

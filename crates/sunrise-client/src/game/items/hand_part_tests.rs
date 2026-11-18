@@ -202,9 +202,12 @@ fn without_a_part_the_break_compares_item_and_components() {
         game.inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
         game.selected = 0;
         let began = game.main_hand_key();
+        // A use shrinks the stack in place: the same break.
         game.inventory[0].as_mut().unwrap().count = 5;
-        game.inventory[0].as_mut().unwrap().damage = 2;
         assert!(game.same_destroying_item(&began));
+        // The server's new stack with more wear: a damage component apart, so it restarts.
+        game.inventory[0].as_mut().unwrap().damage = 2;
+        assert!(!game.same_destroying_item(&began));
         game.inventory[0] = Some(ItemStack::new("minecraft:diamond_pickaxe", 1));
         assert!(!game.same_destroying_item(&began));
         game.inventory[0] = None;

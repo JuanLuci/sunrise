@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Paparan",
   "sunrise.studio.topbar.view_short": "Paparan",
   "sunrise.studio.unknown_server": "Tidak Diketahui",
-  "sunrise.tempban.dedicated_required": "Larangan sementara memerlukan pelayan khusus",
-  "sunrise.tempban.invalid_duration": "%s bukan tempoh: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Terdapat %s larangan sementara:",
-  "sunrise.tempban.list.empty": "Tiada larangan sementara",
-  "sunrise.tempban.list.entry": "%1$s dilarang oleh %2$s %3$s (sehingga %4$s)",
-  "sunrise.tempban.success": "%1$s selama %2$s, sehingga %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Tidak bergabung dengan Mojang atau Microsoft"
 }

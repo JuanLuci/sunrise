@@ -91,13 +91,13 @@ impl Game<'_> {
         else {
             return;
         };
-        // Sunrise's own moderation commands go in the same tree, so operators' clients complete
-        // them instead of showing them as unknown; the game still runs them itself
-        // (`run_guest_command`). A mod's command of the same name wins.
-        let extras = super::super::tempban::moderation_commands(
-            host.hub.chat_filter_on(),
-            self.server_lists.is_some(),
-        );
+        // The chat filter's mute commands, for operators of `/ban`'s level (a mod's command wins).
+        let extras: Vec<mod_api::Command> = if host.hub.chat_filter_on() {
+            let usages = super::super::chat_filter::MUTE_USAGES.into_iter();
+            usages.map(|usage| mod_api::Command::op(usage, 3)).collect()
+        } else {
+            Vec::new()
+        };
         let usages = [commands.usages.as_slice(), &extras].concat();
         let (tree, _, _) = command_tree(
             &usages,

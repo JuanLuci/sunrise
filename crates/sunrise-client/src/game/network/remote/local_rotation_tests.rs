@@ -117,3 +117,57 @@ fn a_mod_set_look_is_clamped_and_sent_once_by_the_tick() {
         });
     });
 }
+
+/// How many packets of any kind the client sent before a fence.
+fn sent_packets(game: &crate::game::Game<'_>, server: &mut Connection) -> usize {
+    game.send(S::Punch(sunrise_protocol::packets::Empty));
+    let mut count = 0;
+    loop {
+        let (id, payload) = server.recv().unwrap();
+        if matches!(S::decode(id, &payload).unwrap(), S::Punch(_)) {
+            return count;
+        }
+        count += 1;
+    }
+}
+
+/// `LocalPlayer.tickDeath` removes the player at deathTime 20: from then on nothing goes out, not
+/// a changed input or look, until the respawn's new player (deathTime back at 0).
+#[test]
+#[ignore = "daily"]
+fn a_player_dead_for_twenty_ticks_sends_nothing_until_it_respawns() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        with_client_game(|game| {
+            let mut server = Connection::local(logged_client(game));
+            server
+                .reader
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            finish_login(&mut server);
+            game.title = None;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.remote_send_state(0);
+            sent_packets(game, &mut server);
+
+            game.screen = crate::game::Screen::Dead;
+            game.ui.death_time = 19;
+            game.yaw = 10.0;
+            game.remote_send_state(1);
+            assert!(sent_packets(game, &mut server) > 0, "still sent at 19");
+
+            game.ui.death_time = 20;
+            for call in 0..25 {
+                game.yaw = 20.0 + call as f32;
+                game.remote_send_state(call as u8 & 1);
+                assert_eq!(sent_packets(game, &mut server), 0, "call {call}");
+            }
+
+            // The respawn's new player starts its death clock again.
+            game.screen = crate::game::Screen::Playing;
+            game.ui.death_time = 0;
+            game.yaw = 90.0;
+            game.remote_send_state(1);
+            assert!(sent_packets(game, &mut server) > 0, "sent after respawn");
+        });
+    });
+}

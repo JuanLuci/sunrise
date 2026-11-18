@@ -695,9 +695,14 @@ impl Game<'_> {
             }
             Kind::Anvil => {
                 let name = self.anvil_item_name(&s);
+                // createResult's getHoverName().getString(), as vanilla resolves it.
                 let hover = s.inputs[0]
                     .as_ref()
-                    .map(|i| stations::hover_name(&self.pack.names, i))
+                    .map(|i| {
+                        sunrise_client::lang::returned_to_server(|| {
+                            stations::hover_name(&self.pack.names, i)
+                        })
+                    })
                     .unwrap_or_default();
                 s.anvil = stations::anvil_result(
                     &enchantments,
@@ -1178,11 +1183,16 @@ impl Game<'_> {
             return;
         };
         if s.kind == Kind::Anvil && s.inputs[0] != s.anvil_last {
-            // AnvilScreen.slotChanged: the box follows its input item.
+            // AnvilScreen.slotChanged: the box follows its input item, named as vanilla's
+            // client names it (the box's text goes back to a server).
             s.anvil_last = s.inputs[0].clone();
             let name = s.inputs[0]
                 .as_ref()
-                .map(|i| stations::hover_name(&self.pack.names, i))
+                .map(|i| {
+                    sunrise_client::lang::returned_to_server(|| {
+                        stations::hover_name(&self.pack.names, i)
+                    })
+                })
                 .unwrap_or_default();
             anvil::input_changed(s, name);
         }
@@ -1622,11 +1632,23 @@ impl Game<'_> {
                 lines.push((random.with_color(sunrise_client::text::GRAY), u32::MAX));
             }
         }
+        let context = mod_api::TooltipAppendContext {
+            player: self.own_uuid(),
+            player_entity_id: self.own_entity_id(),
+            tick_rate: if self.native_client_level().is_some() {
+                self.clock.rate()
+            } else {
+                20.0
+            },
+            advanced,
+            creative,
+            nested,
+        };
         // A mod item's own `Item.appendHoverText`, its parts' lines, before the components; a
         // tooltip the stack hides, and a crossbow's projectile, stay without them.
         if mod_callbacks && !nested && !lines.is_empty() {
             let mut own = Vec::new();
-            self.native_tooltip(stack, &mut own);
+            self.native_tooltip(stack, &context, &mut own);
             lines.extend(own);
         }
         // The component details, marked for the placements of the registered appenders.
@@ -2017,13 +2039,6 @@ impl Game<'_> {
         }
         // RegisterTooltipAppendersEvent: each registered appender's lines, where its placement puts them.
         if !appenders.is_empty() {
-            let context = mod_api::TooltipAppendContext {
-                player: self.own_uuid(),
-                player_entity_id: self.own_entity_id(),
-                advanced,
-                creative,
-                nested,
-            };
             sunrise_client::item_tooltip::add_appender_lines(
                 &mut lines,
                 &details,
@@ -2588,6 +2603,131 @@ mod tests {
                     advanced
                 );
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn tooltip_part_context_tracks_flags_and_client_tick_rate() {
+        use mod_api::{
+            ClientHost, Hooks, ItemPart, ModEntry, Registrar, TooltipAppendContext, TooltipEvent,
+        };
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct Part(Arc<Mutex<Vec<TooltipAppendContext>>>);
+        #[mod_api::sunrise_part]
+        impl ItemPart for Part {
+            fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
+                self.0.lock().unwrap().push(*event.context);
+                event
+                    .lines
+                    .push((mod_api::Text::literal("context"), u32::MAX));
+            }
+        }
+        struct Mod(Part);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                let item = registrar.item_key("minecraft:stick");
+                registrar.item_part(item, self.0.clone());
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "tooltip_context",
+            Box::new(Mod(Part(heard.clone()))),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                use sunrise_protocol::{
+                    connection::Pipe,
+                    packets::play::{self, Clientbound as C},
+                };
+
+                let stack = super::ItemStack::new("minecraft:stick", 1);
+                let assert_context = |game: &mut super::Game<'_>, advanced, rate| {
+                    let lines =
+                        game.build_stack_tooltip_lines(&stack, false, false, advanced, true);
+                    assert!(lines.iter().any(|(text, _)| text.plain() == "context"));
+                    let context = heard.lock().unwrap().pop().expect("item tooltip Part ran");
+                    assert_eq!(context.advanced, advanced);
+                    assert_eq!(context.tick_rate, rate);
+                    assert!(!context.creative && !context.nested);
+                };
+                game.clock.set_rate(40.0);
+                assert!(game.native_client_level().is_none());
+                assert_context(game, false, 20.0);
+
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "TooltipContextTest").unwrap();
+                let ticking = |rate, frozen| C::TickingState(play::TickingState { rate, frozen });
+                let step = || C::TickingStep(play::TickingStep { steps: 4 });
+                game.handle_packet(ticking(37.5, true)).unwrap();
+                game.handle_packet(step()).unwrap();
+                assert_eq!(game.clock.rate(), 20.0, "no level has received a rate");
+                assert_eq!(game.clock.frozen(), game.clock.still());
+                assert!(!game.clock.stepping());
+
+                let mut spawn = play::SpawnInfo {
+                    dimension_type: 0,
+                    dimension: "minecraft:overworld".into(),
+                    seed: 0,
+                    game_type: 0,
+                    previous_game_type: None,
+                    debug: false,
+                    flat: false,
+                    last_death: None,
+                    portal_cooldown: 0,
+                    sea_level: 63,
+                };
+                game.handle_packet(C::Login(play::Login {
+                    player_id: 7,
+                    hardcore: false,
+                    levels: vec![spawn.dimension.clone(), "test:other_level".into()],
+                    max_players: 1,
+                    chunk_radius: 2,
+                    simulation_distance: 2,
+                    reduced_debug_info: false,
+                    show_death_screen: true,
+                    limited_crafting: false,
+                    spawn: spawn.clone(),
+                    online_mode: false,
+                    enforces_secure_chat: false,
+                }))
+                .unwrap();
+                let first_level = game.native_client_level().expect("Login starts a level");
+                assert_context(game, true, 20.0);
+
+                game.handle_packet(ticking(37.5, true)).unwrap();
+                game.handle_packet(step()).unwrap();
+                assert_context(game, false, 37.5);
+
+                game.handle_packet(C::Respawn(play::Respawn {
+                    spawn: spawn.clone(),
+                    keep: 0,
+                }))
+                .unwrap();
+                assert_eq!(game.native_client_level(), Some(first_level));
+                assert_context(game, true, 37.5);
+                assert!(game.clock.frozen() && game.clock.stepping());
+
+                // A different key with the same dimension type still creates a fresh ClientLevel.
+                spawn.dimension = "test:other_level".into();
+                game.handle_packet(C::Respawn(play::Respawn { spawn, keep: 0 }))
+                    .unwrap();
+                let next_level = game.native_client_level().expect("Respawn starts a level");
+                assert_ne!(first_level, next_level);
+                assert_context(game, false, 20.0);
+                assert_eq!(game.clock.frozen(), game.clock.still());
+                assert!(!game.clock.stepping());
+
+                game.handle_packet(ticking(12.5, false)).unwrap();
+                assert_context(game, true, 12.5);
+                assert!(heard.lock().unwrap().is_empty());
+            });
         });
     }
 

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Від",
   "sunrise.studio.topbar.view_short": "Від",
   "sunrise.studio.unknown_server": "Невядома",
-  "sunrise.tempban.dedicated_required": "Тымчасовыя забароны патрабуюць выдзеленага сервера",
-  "sunrise.tempban.invalid_duration": "%s не з'яўляецца працягласцю: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Ёсць %s тымчасовых забарон:",
-  "sunrise.tempban.list.empty": "Тымчасовых забарон няма",
-  "sunrise.tempban.list.entry": "%1$s быў забанены %2$s %3$s (да %4$s)",
-  "sunrise.tempban.success": "%1$s на %2$s, да %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Не звязаны з Mojang або Microsoft"
 }

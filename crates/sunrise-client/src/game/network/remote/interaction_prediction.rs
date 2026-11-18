@@ -89,8 +89,15 @@ impl Game<'_> {
                         .mobs
                         .iter()
                         .any(|m| m.extra.mount.is_some_and(|r| r as i32 == hit.id)));
-            let passes =
-                is_painting || frame_passes || boat_passes || cart_passes || cushion_passes;
+            // EndCrystal and EnderDragonPart keep Entity.interact's PASS.
+            let crystal_passes = self.crystals.iter().any(|c| c.id as i32 == hit.id)
+                || self.level_dragon_part(hit.id as u32).is_some();
+            let passes = is_painting
+                || frame_passes
+                || boat_passes
+                || cart_passes
+                || cushion_passes
+                || crystal_passes;
             // Otherwise the main hand's turn takes it; there is no off hand turn.
             if response.is_none() && hand == Hand::Off && !passes {
                 return false;
@@ -405,6 +412,19 @@ impl Game<'_> {
                 if result.should_swing() && block_answer != Some(Answer::SuccessServer) {
                     self.with_hand(hand, Game::swing_arm);
                 }
+            } else if item_used
+                && held
+                    .as_ref()
+                    .is_some_and(|s| &*s.item == "minecraft:end_crystal")
+            {
+                // EndCrystalItem.useOn on a client level: SUCCESS where the
+                // crystal fits (the server spawns it), this hand swings; FAIL
+                // elsewhere, no swing. Either ends the click
+                // (Minecraft.startUseItem), so no UseItem and no other hand.
+                if self.end_crystal_fits(hit.pos) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
+                return true;
             } else if item_used && held.as_ref().is_some_and(|s| &*s.item == "minecraft:brush") {
                 // BrushItem.useOn: brushing starts here (CONSUME, no swing); the
                 // server brushes and the dust is this client's own.
@@ -509,8 +529,8 @@ impl Game<'_> {
                     if let Some(stack) = &held {
                         let pos = placed.0;
                         self.apply_predicted_item([pos.x, pos.y, pos.z], stack);
+                        self.with_hand(hand, |g| g.consume_placed(stack));
                     }
-                    self.with_hand(hand, Game::consume_held);
                 } else if let Some(r) = self.remote.as_mut() {
                     // BlockItem.place plays its sound only once the block is set: the
                     // server's resend of the target it refused is no placement.

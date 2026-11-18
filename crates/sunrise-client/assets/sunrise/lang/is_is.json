@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Útsýni",
   "sunrise.studio.topbar.view_short": "Útsýni",
   "sunrise.studio.unknown_server": "Óþekkt",
-  "sunrise.tempban.dedicated_required": "Tímabundin bönn þurfa sérhæfðan netþjón",
-  "sunrise.tempban.invalid_duration": "%s er ekki tímalengd: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Það eru %s tímabundin bönn:",
-  "sunrise.tempban.list.empty": "Engin tímabundin bönn eru til",
-  "sunrise.tempban.list.entry": "%1$s var bannaður af %2$s %3$s (þar til %4$s)",
-  "sunrise.tempban.success": "%1$s í %2$s, þar til %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ekki tengt Mojang eða Microsoft"
 }

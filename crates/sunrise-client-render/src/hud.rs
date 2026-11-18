@@ -1354,15 +1354,6 @@ impl HudAtlas {
                 images.push(image);
             }
         }
-        // The title screen's "JAVA EDITION" banner reads "RUST EDITION".
-        if let Some(edition) = images
-            .iter_mut()
-            .find(|i| i.0 == crate::title_edition::SPRITE)
-            && let Some(pixels) =
-                crate::title_edition::rust_edition(edition.1, edition.2, &edition.3)
-        {
-            edition.3 = pixels;
-        }
         images.push(("sunrise/white".into(), 4, 4, vec![255; 64]));
         // The main menu's Mods button, unless a pack brought its own icon.
         let mods_icon = crate::mods_screen::icon_image();

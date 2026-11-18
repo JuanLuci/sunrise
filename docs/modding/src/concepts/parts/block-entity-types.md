@@ -137,7 +137,7 @@ let done = Press::edit_state(host, entity, |_, progress| {
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
 - Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
-  or reuses a key with a different Wire layout. It refuses a type whose Wire form holds a resource
+  or reuses a key with a type of another Rust type name. It refuses a type whose Wire form holds a resource
   handle (an erased handler such as `Arc<dyn BlockPart>`) on every target: such a value crosses
   only into one link group and cannot be saved. It also refuses a declaration without a codec from
   a mod the game loaded as wasm, whatever the module says of itself. The refusal names the Part,

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Tampilan",
   "sunrise.studio.topbar.view_short": "Tampilan",
   "sunrise.studio.unknown_server": "Tidak Dikenal",
-  "sunrise.tempban.dedicated_required": "Ban sementara memerlukan server khusus",
-  "sunrise.tempban.invalid_duration": "%s bukan durasi: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Ada %s ban sementara:",
-  "sunrise.tempban.list.empty": "Tidak ada ban sementara",
-  "sunrise.tempban.list.entry": "%1$s diban oleh %2$s %3$s (hingga %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s, hingga %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Tidak berafiliasi dengan Mojang atau Microsoft"
 }

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Ikuspegia",
   "sunrise.studio.topbar.view_short": "Ikuspegia",
   "sunrise.studio.unknown_server": "Ezezaguna",
-  "sunrise.tempban.dedicated_required": "Aldi baterako debekuek zerbitzari dedikatu bat behar dute",
-  "sunrise.tempban.invalid_duration": "%s ez da iraupen bat: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s aldi baterako debeku daude:",
-  "sunrise.tempban.list.empty": "Ez dago aldi baterako debekurik",
-  "sunrise.tempban.list.entry": "%2$s(e)k %1$s debekatu zuen %3$s (%4$s arte)",
-  "sunrise.tempban.success": "%1$s %2$s baterako, %3$s arte",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ez dago Mojang edo Microsoft-ekin afiliatuta"
 }

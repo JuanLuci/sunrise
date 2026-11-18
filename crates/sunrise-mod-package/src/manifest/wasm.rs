@@ -155,7 +155,7 @@ fn valid_member(bytes: &[u8]) -> Result<(), WasmError> {
         .validate_all(bytes)
         .map_err(|_| WasmError::InvalidMember)?;
     let mut shared = false;
-    let mut exports = [false; 3];
+    let mut exports = [false; 2];
     for payload in wasmparser::Parser::new(0).parse_all(bytes) {
         match payload.map_err(|_| WasmError::InvalidMember)? {
             wasmparser::Payload::Version {
@@ -203,11 +203,7 @@ fn valid_member(bytes: &[u8]) -> Result<(), WasmError> {
                             )
                             | ("env", _, wasmparser::TypeRef::Func(_))
                             | ("GOT.mem" | "GOT.func", _, wasmparser::TypeRef::Global(_))
-                            | (
-                                "sunrise",
-                                "host" | "host_reply",
-                                wasmparser::TypeRef::Func(_)
-                            )
+                            | ("sunrise", _, wasmparser::TypeRef::Func(_))
                     );
                     if !allowed {
                         return Err(WasmError::InvalidMember);
@@ -218,10 +214,7 @@ fn valid_member(bytes: &[u8]) -> Result<(), WasmError> {
                 for export in section {
                     let export = export.map_err(|_| WasmError::InvalidMember)?;
                     if export.kind == wasmparser::ExternalKind::Func {
-                        for (index, name) in ["sunrise_layout", "sunrise_in", "sunrise_hook"]
-                            .iter()
-                            .enumerate()
-                        {
+                        for (index, name) in ["sunrise_in", "sunrise_hook"].iter().enumerate() {
                             if export.name == *name {
                                 exports[index] = true;
                             }
@@ -269,8 +262,12 @@ mod tests {
             wat::parse_str(format!("(module {dylink} {imports} {exports})")).unwrap()
         };
         let dylink = r#"(@custom "dylink.0" "\01\04\00\00\00\00")"#;
-        let exports = r#"(func (export "sunrise_layout")) (func (export "sunrise_in")) (func (export "sunrise_hook"))"#;
-        let imports = r#"(import "sunrise" "host" (func)) (import "env" "memory" (memory 1))"#;
+        let exports = r#"(func (export "sunrise_in")) (func (export "sunrise_hook"))"#;
+        let imports = format!(
+            r#"(import "sunrise" "{}" (func)) (import "env" "memory" (memory 1))"#,
+            mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+        );
+        let imports = imports.as_str();
         let good = module(imports, exports, dylink);
         assert_eq!(section(&good).check(&good), Ok(()));
         for bad in [
@@ -289,7 +286,11 @@ mod tests {
                 exports,
                 dylink,
             ),
-            module(r#"(import "sunrise" "other" (func))"#, exports, dylink),
+            module(
+                r#"(import "sunrise" "call:Owner::m#abcd" (global i32))"#,
+                exports,
+                dylink,
+            ),
         ] {
             assert_eq!(section(&bad).check(&bad), Err(WasmError::InvalidMember));
         }

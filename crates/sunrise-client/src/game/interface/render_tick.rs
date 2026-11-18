@@ -762,12 +762,13 @@ impl Game<'_> {
                     let (bx, bz) = (random.next_double(), random.next_double());
                     let state = world.block(x, below, z);
                     let f = facts.get(state);
-                    let block_top = match self.collision.cached_shapes().cached_shape(state) {
-                        Ok(Some(shape)) if !shape.is_empty() => {
-                            shape.max_at(sunrise_core::geometry::Axis::Y, bx, bz)
-                        }
-                        _ => 0.0,
-                    };
+                    let block_top = self
+                        .collision
+                        .cached_shapes()
+                        .cached_collision_top(state, [x, below, z], bx, bz)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0.0);
                     let fluid_top = if f.fluid == Fluid::None {
                         0.0
                     } else {

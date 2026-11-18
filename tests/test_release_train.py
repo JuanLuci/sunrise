@@ -1,6 +1,8 @@
 import datetime as dt
+import io
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 import tempfile
@@ -314,39 +316,6 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertFalse(train.decision("game", [], NOW, new_line="0.3", blockers=[7])[0])
         self.assertTrue(train.decision("game", [pr(1)], NOW, blockers=[])[0])
 
-    @mock.patch.object(train, "REPO", "horizon-rust/horizon")
-    def test_game_releases_ship_only_what_parity_main_passed(self):
-        def runs(parity, checks):
-            def gh_json(*arguments):
-                table = parity if "parity-main" in arguments else checks
-                if "--commit" in arguments:
-                    sha = arguments[arguments.index("--commit") + 1]
-                    return [{"status": s, "conclusion": c} for h, s, c in table if h == sha]
-                if "--status" in arguments:
-                    wanted = arguments[arguments.index("--status") + 1]
-                    table = [(h, s, c) for h, s, c in table if c == wanted]
-                return [{"headSha": h, "status": s, "conclusion": c} for h, s, c in table]
-            return mock.patch.object(train, "gh_json", gh_json)
-        checks = [("c", "in_progress", ""), ("b", "completed", "success"), ("a", "completed", "success")]
-        with runs([("c", "queued", ""), ("b", "completed", "cancelled"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(), "b", "checks alone: the newest green checks")
-            self.assertEqual(train.green_main_head(parity=True), "a", "a superseded parity-main run counts for nothing")
-            self.assertTrue(train.passed_on("parity-main", "a"))
-            self.assertFalse(train.passed_on("parity-main", "b"))
-        with runs([("b", "completed", "failure"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(parity=True), "a",
-                             "a later failed batch holds only its own merges, not the commit before it")
-        with runs([("c", "completed", "success")], checks):
-            self.assertIsNone(train.green_main_head(parity=True), "its checks must pass too")
-        with runs([("c", "completed", "success"), ("a", "completed", "success")], checks):
-            self.assertEqual(train.green_main_head(parity=True), "a", "the newest green commit whose checks passed")
-        with runs([("c", "completed", "failure"), ("b", "completed", "cancelled")], checks):
-            self.assertIsNone(train.green_main_head(parity=True), "nothing parity-main passed")
-        with runs([("c", "completed", "success")], [("c", "completed", "success")]):
-            self.assertEqual(train.green_main_head(), "c")
-        with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
-            self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
-
     def test_launcher_manual_base_is_pinned_and_must_belong_to_main(self):
         workflow = (train.ROOT / ".github/workflows/launcher.yml").read_text()
         selection = workflow.split("          set -euo pipefail\n", 1)[1].split(
@@ -459,7 +428,6 @@ class ReleaseTrainTests(unittest.TestCase):
             return [{"jobs": jobs[ident][:2]}, {"jobs": jobs[ident][2:]}]
         with mock.patch.object(train, "REPO", "sunrise-org/sunrise"), \
                 mock.patch.object(train, "gh_json", side_effect=api) as requests:
-            self.assertEqual(train.green_main_head(parity=True), "good", "missing gate is not success")
             self.assertEqual(train.green_main_head(), "good", "non-gate failure must not reject a build")
             jobs[3] = gates
             self.assertEqual(train.green_main_head(), "new")
@@ -506,7 +474,8 @@ class ReleaseTrainTests(unittest.TestCase):
             for n in range(3):
                 git("commit", "-q", "--allow-empty", "-m", str(n))
                 commits.append(git("rev-parse", "HEAD"))
-            with mock.patch.object(train, "ROOT", Path(folder)):
+            with mock.patch.object(train, "ROOT", Path(folder)), \
+                    mock.patch.object(train, "daily_green_commit", return_value=commits[1]):
                 for channel in ("snapshot", "nightly"):
                     git("update-ref", "refs/remotes/origin/main", commits[1])
                     head = commits[1]
@@ -531,6 +500,126 @@ class ReleaseTrainTests(unittest.TestCase):
                             train.channel_head(channel, commits[2])
                         with self.assertRaisesRegex(SystemExit, "not a commit of this repository"):
                             train.channel_head(channel, "f" * 40)
+
+    def test_a_nightly_ships_only_daily_green_unless_the_owner_granted_an_exception(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=folder, text=True, stderr=subprocess.DEVNULL).strip()
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            commits = []
+            for n in range(2):
+                git("commit", "-q", "--allow-empty", "-m", str(n))
+                commits.append(git("rev-parse", "HEAD"))
+            git("update-ref", "refs/remotes/origin/main", commits[1])
+            with mock.patch.object(train, "ROOT", Path(folder)), \
+                    mock.patch.object(train, "fork_gate_passed", return_value=True):
+                # A gate-green commit of main that is not daily-green: refused, by default and by name.
+                with mock.patch.object(train, "daily_green_commit", return_value=commits[0]):
+                    self.assertEqual(train.channel_head("nightly", ""), commits[0], "the default is daily-green")
+                    with self.assertRaisesRegex(SystemExit, "not the commit `daily-green` points to"):
+                        train.channel_head("nightly", commits[1])
+                    self.assertEqual(train.channel_head("snapshot", commits[1]), commits[1], "a snapshot needs no daily")
+                with mock.patch.object(train, "daily_green_commit", return_value=""):
+                    with self.assertRaisesRegex(SystemExit, "none yet"):
+                        train.channel_head("nightly", "")
+                    # The owner's one-time grant names its commit in full, which still needs the gate.
+                    with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                        self.assertEqual(train.channel_head("nightly", commits[1], "owner 2026-11-17\n::error::x %"),
+                                         commits[1])
+                    self.assertEqual(err.getvalue(), f"::warning::{commits[1][:9]} is allowed by a one-time exception "
+                                     "instead of a green daily run: owner 2026-11-17%0A::error::x %25\n",
+                                     "one annotation, whatever the grant holds")
+                    for named in ("", "main", commits[1][:9]):
+                        with self.assertRaisesRegex(SystemExit, "names the full 40-character commit"):
+                            train.channel_head("nightly", named, "owner 2026-11-17: the cursor fix")
+                    self.assertEqual(train.channel_head("snapshot", "", "ignored"), commits[1], "a snapshot takes none")
+                with mock.patch.object(train, "fork_gate_passed", return_value=False), \
+                        mock.patch.object(train, "daily_green_commit", side_effect=AssertionError("not consulted")):
+                    with self.assertRaisesRegex(SystemExit, "needs the gate green"):
+                        train.channel_head("nightly", commits[1], "owner 2026-11-17: the cursor fix")
+
+    def test_daily_green_is_read_from_origin_never_a_local_tag(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def git(cwd, *args):
+                return subprocess.check_output(["git", *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL).strip()
+            origin, clone = Path(folder, "origin"), Path(folder, "clone")
+            git(folder, "init", "-q", "-b", "main", str(origin))
+            for n in range(2):
+                git(origin, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty",
+                    "-m", str(n))
+            first, second = git(origin, "rev-parse", "HEAD~1"), git(origin, "rev-parse", "HEAD")
+            git(origin, "-c", "user.name=T", "-c", "user.email=t@example.invalid", "tag", "-a", "-m", "green",
+                "daily-green", first)
+            git(folder, "clone", "-q", str(origin), str(clone))
+            with mock.patch.object(train, "ROOT", clone):
+                self.assertEqual(train.daily_green_commit(), first, "an annotated tag's commit")
+                git(origin, "tag", "-d", "daily-green")
+                self.assertEqual(train.daily_green_commit(), "", "withdrawn on origin: none, whatever the clone holds")
+                git(origin, "tag", "daily-green", second)
+                self.assertEqual(train.daily_green_commit(), second)
+                git(clone, "remote", "set-url", "origin", str(Path(folder, "gone")))
+                with self.assertRaises(SystemExit, msg="a failed lookup never falls back to the local tag"):
+                    train.daily_green_commit()
+
+    def test_a_blank_grant_is_no_grant_at_either_entry_point(self):
+        argv = ["release_train.py", "decide", "--kind", "game", "--channel", "nightly", "--exception", " \n "]
+        with mock.patch("sys.argv", argv), \
+                mock.patch.object(train, "channel_head", side_effect=SystemExit("stop")) as head:
+            with self.assertRaises(SystemExit):
+                train.main()
+        head.assert_called_once_with("nightly", None, "")
+        from tools.ci import nightly
+        with mock.patch.dict(nightly.os.environ, {"NIGHTLY_BASE": "", "NIGHTLY_EXCEPTION": "  "}), \
+                mock.patch.object(nightly.train, "channel_head", side_effect=SystemExit("stop")) as head:
+            with self.assertRaises(SystemExit):
+                nightly.green_base("sunrise-org/sunrise", "")
+        head.assert_called_once_with("nightly", "", "")
+
+    def test_a_publishing_run_runs_a_cancelled_gate_again_and_waits_for_it(self):
+        sha = "a" * 40
+        def gate(runs, passed, publishing=True):
+            """channel_head's gate check on `runs` (push_gate_run's answers in turn) and `passed` (gate_jobs_passed's),
+            returning the rerun commands it ran."""
+            reruns = []
+            def run(*command, check=True):
+                if command[:3] == ("gh", "run", "rerun"):
+                    reruns.append(command)
+                    return ""
+                return subprocess.run(command, cwd=train.ROOT, capture_output=True, text=True).stdout
+            with mock.patch.object(train, "push_gate_run", side_effect=runs), \
+                    mock.patch.object(train, "gate_jobs_passed", side_effect=passed), \
+                    mock.patch.object(train, "run", side_effect=run), \
+                    mock.patch.object(train.time, "sleep"), \
+                    mock.patch.dict(os.environ, {"GATE_RERUN": "1" if publishing else ""}):
+                return train.fork_gate_passed(sha) or (publishing and train.gate_again(sha)), reruns
+        cancelled = dict(id=7, status="completed", conclusion="cancelled")
+        running = dict(id=7, status="in_progress", conclusion=None)
+        passed = dict(id=7, status="completed", conclusion="success")
+        # The next push cancelled the commit's gate: it runs again, once, and the release waits for it.
+        self.assertEqual(gate([cancelled, cancelled, running, passed], [False, False, True]),
+                         (True, [("gh", "run", "rerun", "7", "--failed", "--repo", train.REPO)]))
+        # Still running when asked: waited for, nothing started again.
+        self.assertEqual(gate([running, running, passed], [False, True]), (True, []))
+        # A gate job that failed is red: never run again.
+        failed = dict(id=7, status="completed", conclusion="failure")
+        self.assertEqual(gate([failed, failed], [False, False]), (False, []))
+        # Cancelled again after its second run: refused, not a third.
+        self.assertEqual(gate([cancelled, cancelled, cancelled], [False, False, False]),
+                         (False, [("gh", "run", "rerun", "7", "--failed", "--repo", train.REPO)]))
+        # A dry run or a by-hand check only reads.
+        self.assertEqual(gate([cancelled], [False], publishing=False), (False, []))
+        # Only publishing runs (release.yml's decide, nightly-build.yml's pick) set GATE_RERUN, with the right to start the run again.
+        sys.path.insert(0, str(train.ROOT / "tools/ci/vendor/pyyaml-6.0.3.zip"))
+        import yaml
+        decide = yaml.safe_load((train.ROOT / ".github/workflows/release.yml").read_text())["jobs"]["decide"]
+        self.assertEqual(decide["permissions"]["actions"], "write")
+        self.assertEqual(decide["steps"][-1]["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run == 'false' && '1' || '' }}")
+        pick = yaml.safe_load((train.ROOT / ".github/workflows/nightly-build.yml").read_text())["jobs"]["pick"]
+        self.assertEqual(pick["permissions"]["actions"], "write")
+        step = next(step for step in pick["steps"] if step.get("id") == "pick")
+        self.assertEqual(step["env"]["GATE_RERUN"], "${{ steps.mode.outputs.dry_run != 'true' && '1' || '' }}")
 
     def test_a_snapshot_is_tagged_by_kind_date_and_commit(self):
         sha = "0c02067" + "a" * 33

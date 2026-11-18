@@ -53,6 +53,38 @@ impl RecipeSerializersRegistrar for PartRegistrar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Context;
+    impl crate::LoopContext for Context {
+        fn is_in_tag(&self, _: crate::ItemKey, _: crate::TagKey) -> Option<bool> {
+            None
+        }
+        fn item_count(&self, _: crate::TagKey) -> Option<usize> {
+            None
+        }
+        fn item_at(&self, _: crate::TagKey, _: usize) -> Option<crate::ItemKey> {
+            None
+        }
+        fn side(&self) -> crate::LoopSide {
+            crate::LoopSide::Server
+        }
+        fn registry(&self, _: &str) -> Option<Arc<[String]>> {
+            None
+        }
+        fn setting(&self, _: &str, _: &str) -> Option<String> {
+            None
+        }
+        fn mods(&self) -> crate::LoadedMods {
+            unreachable!("not used by this fixture")
+        }
+        fn mod_recipe_property_contains(&self, _: &str, _: crate::ItemKey) -> bool {
+            false
+        }
+    }
+    impl crate::CraftingRemainders for Context {
+        fn default_remainder(&self, _: u32) -> Option<crate::ItemStack> {
+            None
+        }
+    }
     struct Literal {
         result: crate::ItemKey,
     }
@@ -72,7 +104,12 @@ mod tests {
         fn write(&self, value: &u32) -> Result<String, String> {
             Ok(format!("{{\"count\":{value}}}"))
         }
-        fn matches(&self, value: &u32, grid: crate::CraftingGrid) -> bool {
+        fn matches(
+            &self,
+            _: &dyn crate::LoopContext,
+            value: &u32,
+            grid: crate::CraftingGrid,
+        ) -> bool {
             *value == 3
                 && grid.width == 3
                 && grid.height == 3
@@ -82,11 +119,17 @@ mod tests {
                     .enumerate()
                     .all(|(i, c)| c.is_some() == [0, 4, 8].contains(&i))
         }
-        fn assemble(&self, value: &u32, _: crate::CraftingGrid) -> Option<crate::ItemStack> {
+        fn assemble(
+            &self,
+            _: &dyn crate::LoopContext,
+            value: &u32,
+            _: crate::CraftingGrid,
+        ) -> Option<crate::ItemStack> {
             crate::ItemStack::new(self.result, *value)
         }
         fn remaining_items(
             &self,
+            _: &dyn crate::CraftingRemainders,
             _: &u32,
             _: crate::CraftingGrid,
         ) -> Option<Vec<Option<crate::ItemStack>>> {
@@ -115,7 +158,11 @@ mod tests {
             mod_vocab::__private::parts_installation::crafting_recipe("test:diagonal").unwrap();
         let value = handler.decode(r#"{"count":3}"#).unwrap();
         let out = handler
-            .assemble(&value, crate::CraftingGrid::new(1, 1, vec![None]).unwrap())
+            .assemble(
+                &Context,
+                &value,
+                crate::CraftingGrid::new(1, 1, vec![None]).unwrap(),
+            )
             .unwrap();
         assert_eq!(out.count(), 3);
         assert_eq!(
@@ -127,17 +174,17 @@ mod tests {
             cells[i] = Some(out.clone());
         }
         let grid = crate::CraftingGrid::new(3, 3, cells).unwrap();
-        assert!(handler.matches(&value, grid.clone()));
+        assert!(handler.matches(&Context, &value, grid.clone()));
         assert_eq!(handler.write(&value).unwrap(), r#"{"count":3}"#);
         let mut expected = vec![None; 9];
         expected[4] = crate::ItemStack::new(out.item(), 1);
         assert_eq!(
-            handler.remaining_items(&value, grid.clone()),
+            handler.remaining_items(&Context, &value, grid.clone()),
             Some(expected)
         );
         let mut wrong = grid;
         wrong.cells[4] = None;
-        assert!(!handler.matches(&value, wrong));
+        assert!(!handler.matches(&Context, &value, wrong));
         assert!(handler.decode("{").is_err());
         assert!(handler.decode(r#"{"count":2}"#).is_err());
     }
@@ -150,10 +197,20 @@ mod tests {
         fn write(&self, _: &Self::Value) -> Result<String, String> {
             Ok("{}".into())
         }
-        fn matches(&self, _: &Self::Value, _: crate::CraftingGrid) -> bool {
+        fn matches(
+            &self,
+            _: &dyn crate::LoopContext,
+            _: &Self::Value,
+            _: crate::CraftingGrid,
+        ) -> bool {
             false
         }
-        fn assemble(&self, _: &Self::Value, _: crate::CraftingGrid) -> Option<crate::ItemStack> {
+        fn assemble(
+            &self,
+            _: &dyn crate::LoopContext,
+            _: &Self::Value,
+            _: crate::CraftingGrid,
+        ) -> Option<crate::ItemStack> {
             None
         }
     }

@@ -27,7 +27,7 @@ const PROFILE: &str = "sunrise-wasm";
 const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=sunrise_shared_artifacts_v2";
 
 /// Guest boundary exports, kept even though they originate in an rlib dependency.
-const GUEST_EXPORTS: &[&str] = &["sunrise_layout", "sunrise_in", "sunrise_hook"];
+const GUEST_EXPORTS: &[&str] = &["sunrise_in", "sunrise_hook"];
 
 /// The pinned toolchain's version line, its sysroot's linker, installing it first if needed.
 struct Toolchain {
@@ -296,8 +296,13 @@ fn registrations(
     Ok((registrations, point_names))
 }
 
-pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> {
-    group::build(root, catalog, additional)
+pub fn build(
+    root: &Path,
+    catalog: Option<&Path>,
+    additional: &[PathBuf],
+    api: Option<&mod_surface::Surface>,
+) -> Result<(), String> {
+    group::build(root, catalog, additional, api)
 }
 
 fn member_export(name: &str) -> bool {
@@ -308,7 +313,6 @@ fn member_export(name: &str) -> bool {
 
 fn group_export(name: &str, krate: &str) -> bool {
     if GUEST_EXPORTS.contains(&name)
-        || name == "sunrise_layout_ext"
         || name == "sunrise_mod_points_register"
         || name == "sunrise_mod_points_seal"
         || name.starts_with("__wasm_")
@@ -450,9 +454,6 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         out.push("-Bsymbolic".to_owned());
         for name in GUEST_EXPORTS {
             out.push(format!("--export={name}"));
-        }
-        if std::env::var("SUNRISE_GUEST_REGISTRATIONS").is_ok_and(|s| !s.is_empty()) {
-            out.push("--export=sunrise_layout_ext".to_owned());
         }
     }
     let status = Command::new(&lld)

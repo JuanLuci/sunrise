@@ -694,11 +694,7 @@ impl Game<'_> {
         self.trigger_block("minecraft:placed_block", target, &stack);
         self.check_wither_spawn(target)?;
         self.check_golem_spawn(target)?;
-        self.consume_held();
-        // SolidBucketItem.useOn: BucketItem.getEmptySuccessItem in hand.
-        if solid_bucket && !self.creative {
-            *self.held_mut() = Some(ItemStack::new("minecraft:bucket", 1));
-        }
+        self.consume_placed(&stack);
         // ItemStack.useOn applies the pre-use stack's component side effects
         // after the successful placement and its hand replacement.
         self.apply_use_cooldown(&stack);

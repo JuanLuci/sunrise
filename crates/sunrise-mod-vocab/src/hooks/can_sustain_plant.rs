@@ -8,12 +8,14 @@ pub trait Hooks {
     /// stand there, `Some(false)` refuses it (a planted one pops off when its ground changes to this block),
     /// and left `None` the plant's own `may_place_on` answers, as vanilla's does. Answer only for
     /// your own soil. The level is read-only. Runs on every shape update of a plant over a part's
-    /// block: keep it short.
+    /// block: keep it short. A disabled owner's subscribed soil rule supports plants
+    /// of this type already above it or settling there, but does not authorize a new planting.
     #[hook(
         side = "server",
         contract = "replace",
         out = "sustains",
         scope = "block",
+        inert = "signal",
         key = "ground",
         target = "sunrise_client::game::native_hooks::can_sustain_plant::GameLevel<'_>::native_can_sustain_plant",
         neoforge = "IBlockExtension.canSustainPlant"

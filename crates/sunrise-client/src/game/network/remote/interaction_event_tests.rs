@@ -1826,3 +1826,34 @@ fn a_server_client_keeps_a_bundle_use_until_the_server_completes_it() {
         });
     });
 }
+
+/// `SolidBucketItem.useOn`: a powder snow bucket placed on a block leaves an empty bucket in the
+/// hand that placed it, on the server and in the client's own prediction, so the client's next
+/// click in the same tick uses the bucket (`use_item`) as vanilla's does.
+#[test]
+#[ignore = "daily"]
+fn a_placed_powder_snow_bucket_leaves_a_bucket_in_hand_on_both_sides() {
+    mod_platform::testing::with_mods(Vec::new().into(), || {
+        for client in [false, true] {
+            with_interaction_game(client, |game| {
+                game.set_mode_id(0);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(0, 64, 0, stone).unwrap();
+                game.forced_hit = Some(hit());
+                game.inventory[game.selected] =
+                    Some(ItemStack::new("minecraft:powder_snow_bucket", 1));
+                use_block(game, client);
+                assert_eq!(
+                    game.inventory[game.selected].as_ref().map(|s| &*s.item),
+                    Some("minecraft:bucket"),
+                    "client={client}"
+                );
+            });
+        }
+    });
+}

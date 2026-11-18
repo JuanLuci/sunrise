@@ -12,7 +12,8 @@ pub trait Hooks {
     /// call order. Server-side, on the worldgen worker threads and on the server thread when a
     /// sapling grows, with the server's worldgen `context`: no `Host`, no writes. NeoForge's
     /// `feature` argument is left out: an inline tree feature has no key. Diverges from upstream:
-    /// new hook.
+    /// new hook. A disabled owner's subscribed Part keeps the soil unchanged; the rest of
+    /// the tree still grows.
     #[notes = r#"## Block Parts in worldgen
 
 - **Which Part methods.** A `BlockPart` method declared with the worldgen context runs while a feature generates:
@@ -38,6 +39,7 @@ pub trait Hooks {
         out = "soil",
         context = "worldgen",
         scope = "block",
+        inert = "*soil = Some(None);",
         key = "state",
         target = "mod_api::world::ground::native_on_tree_grow",
         neoforge = "IBlockExtension.onTreeGrow"

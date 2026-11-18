@@ -1752,7 +1752,13 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2, &|s| items.crafting_remainder(s));
+    let rest = recipes.remainders(
+        crate::test_resources::server_loop_context(),
+        id,
+        &grid,
+        2,
+        &|s| items.crafting_remainder(s),
+    );
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];
@@ -4220,8 +4226,9 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         );
         let (base, mods) = block_base(label, &[&declaration]);
         let plan = Plan::new(&base, &mods).unwrap();
+        // A non-occluding template must not suppress an explicit true, even for a partial outline.
         let row =
-            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+            r#"{"can_occlude":false,"solid_render":false,"dampening":1,"skylight_down":false}"#;
         let mut gameplay: J =
             serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
         plan.json("gameplay-facts.json", &mut gameplay).unwrap();
@@ -4268,6 +4275,112 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         }
         fs::remove_dir_all(base.parent().unwrap()).unwrap();
     }
+}
+
+#[test]
+fn declared_offset_occlusion_uses_origin_without_shifting_the_local_outline() {
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "shapes":{"default":[[0,0,0,1,1,1]]}}"#;
+    let (base, mods) = block_base("offset-occlusion-origin", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("shape_occlusion"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(
+        rows[2].get("outline"),
+        Some(&J::Arr(vec![J::Arr(
+            [0., 0., 0., 1., 1., 1.].into_iter().map(J::f64).collect()
+        )]))
+    );
+    let mut occlusion = Tag::compound([
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        ("shapes", Tag::List(vec![])),
+        ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+    ]);
+    plan.nbt(&mut occlusion);
+    plan.declared_shapes(&mut occlusion, false).unwrap();
+    let Some(Tag::List(shapes)) = occlusion.get("shapes") else {
+        panic!("shapes")
+    };
+    let Some(Tag::IntArray(mapping)) = occlusion.get("cached_shapes") else {
+        panic!("mapping")
+    };
+    let shifted = &shapes[mapping[2] as usize];
+    let offset_axis = Tag::LongArray(vec![(-0.25f64).to_bits() as i64, 0.75f64.to_bits() as i64]);
+    assert_eq!(shifted.get("x"), Some(&offset_axis));
+    assert_eq!(shifted.get("z"), Some(&offset_axis));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn enabling_occlusion_uses_the_templates_published_shape() {
+    let declaration =
+        r#"{"template":"minecraft:test","item":false,"properties":{"occludes":true}}"#;
+    let (base, mods) = block_base("enable-template-occlusion", &[declaration]);
+    let tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![
+                encode_shape(&VoxelShape::block()),
+                encode_shape(&VoxelShape::empty()),
+            ]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 1])),
+    ]);
+    fs::write(
+        base.join("occlusion.nbt"),
+        nbt::write_named(
+            &nbt::NamedTag {
+                name: "".into(),
+                tag,
+            },
+            Limits::tables(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":false,"solid_render":false,"dampening":0,"skylight_down":true}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("can_occlude"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
+    assert_eq!(rows[3].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    let mut definitions: J =
+        serde_json::from_str(r#"{"minecraft:test":{"can_occlude":false}}"#).unwrap();
+    plan.json("render-definitions.json", &mut definitions)
+        .unwrap();
+    assert_eq!(
+        definitions.at("testmod:test/can_occlude"),
+        Some(&mut J::Bool(true))
+    );
+    let mut flags = Tag::compound([("blocks", Tag::compound([("minecraft:test", Tag::Byte(0))]))]);
+    plan.nbt(&mut flags);
+    assert_eq!(
+        flags.get("blocks").unwrap().get("testmod:test"),
+        Some(&Tag::Byte(16))
+    );
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
 #[test]
@@ -7593,4 +7706,142 @@ fn a_declared_shape_decides_the_legacy_solid_bit() {
     // A template that forces solidity keeps its answer whatever the shape.
     assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
     assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
+}
+
+#[test]
+fn context_only_property_outline_moves_without_moving_the_fallback() {
+    use sunrise_world::{
+        collision::{CachedCollisionRegistry, ShapeChannel},
+        collision_context::EntityContextKind,
+        registry::{BlockRegistry, BlockStateId},
+    };
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "outline_context_shapes":{"living":{"properties":["axis"],
+        "values":{"x":[[0.25,0,0.25,0.75,1,0.75]]},"default":[]}}}"#;
+    let (base, mods) = block_base("offset-context-variant", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut facts: J = read_json(&base.join("facts.json")).unwrap();
+    plan.json("facts.json", &mut facts).unwrap();
+    let registry =
+        BlockRegistry::from_facts_json(serde_json::to_vec(&facts).unwrap().as_slice()).unwrap();
+    let mut tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![encode_shape(&VoxelShape::block())]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 0])),
+    ]);
+    plan.nbt(&mut tag);
+    plan.declared_shapes(&mut tag, true).unwrap();
+    let cached = CachedCollisionRegistry::from_nbt(&tag, &registry).unwrap();
+    for (id, axis) in [(2, "x"), (3, "y")] {
+        let state = BlockStateId(id);
+        assert_eq!(registry.state(state).unwrap().properties["axis"], axis);
+        let outline = cached
+            .context_outline_shape(state, EntityContextKind::Living)
+            .unwrap();
+        let pos = [1, 64, 2];
+        let outline = cached.positioned_shape(state, ShapeChannel::ContextOutline, pos, outline);
+        if axis == "x" {
+            assert_eq!(outline.min(Axis::X), 0.13333334028720856);
+            assert_eq!(outline.min(Axis::Z), 0.06666667014360428);
+        } else {
+            assert!(outline.is_empty());
+        }
+        assert!(
+            cached
+                .context_outline_shape(state, EntityContextKind::Other)
+                .is_none()
+        );
+        let fallback = cached.cached_shape(state).unwrap().unwrap();
+        assert_eq!(
+            fallback.bounds(),
+            Some(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)))
+        );
+    }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn declared_offsets_resolve_modes_and_publish_only_declared_shape_channels() {
+    for (label, properties, expected) in [
+        ("none", r#""offset":"NONE""#, None),
+        (
+            "xz",
+            r#""offset":"XZ","max_vertical_offset":0.2"#,
+            Some((0.25f32, 0.0f32)),
+        ),
+        ("xyz", r#""offset":"XYZ""#, Some((0.25, 0.2))),
+        (
+            "clamped",
+            r#""offset":"XYZ","max_horizontal_offset":0.125,"max_vertical_offset":0.1"#,
+            Some((0.125, 0.1)),
+        ),
+        ("inherited", "", Some((0.25, 0.0))),
+        (
+            "inherited-xz",
+            r#""max_horizontal_offset":0.125,"max_vertical_offset":0.2"#,
+            Some((0.125, 0.0)),
+        ),
+    ] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,"properties":{{{properties}}},
+          "shapes":{{"default":[[0,0,0,0.5,1,0.5]]}},
+          "interaction_shapes":{{"default":[[0,0,0,1,1,1]]}}}}"#
+        );
+        let (base, mods) = block_base(&format!("offset-{label}"), &[&declaration]);
+        let row = r#"{"offset":true,"outline_offset":true}"#;
+        fs::write(
+            base.join("gameplay-facts.json"),
+            format!(r#"{{"states":[{row},{row}]}}"#),
+        )
+        .unwrap();
+        let plan = Plan::new(&base, &mods).unwrap();
+        assert_eq!(plan.blocks[0].offset_limits, vec![expected; 2]);
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        for row in &rows[2..] {
+            assert_eq!(row.get("offset"), Some(&J::Bool(expected.is_some())));
+            assert_eq!(
+                row.get("outline_offset"),
+                Some(&J::Bool(expected.is_some()))
+            );
+            if let Some((h, v)) = expected {
+                assert_eq!(
+                    row.get("offset_limits"),
+                    Some(&J::Arr(vec![J::f64(h as f64), J::f64(v as f64)]))
+                );
+            }
+        }
+        let mut tag = Tag::compound([
+            (
+                "states",
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            ("shapes", Tag::List(vec![])),
+            ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+        ]);
+        plan.nbt(&mut tag);
+        plan.declared_shapes(&mut tag, true).unwrap();
+        if expected.is_some() {
+            let Some(Tag::List(offsets)) = tag.get("shape_offsets") else {
+                panic!("offsets")
+            };
+            assert_eq!(offsets.len(), 2);
+            // Default collision plus interaction; no contextual channels were declared.
+            assert_eq!(offsets[0].get("channels"), Some(&Tag::Byte(9)));
+        } else {
+            assert!(tag.get("shape_offsets").is_none());
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
 }

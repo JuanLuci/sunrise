@@ -8,12 +8,14 @@ pub trait Hooks {
     /// such as a crop) can stand on. Its template's `canSurvive` asks it, so
     /// the plant is refused there and pops off when its ground changes to
     /// one it can't stand on. Answer only for your own blocks. The level is
-    /// read-only.
+    /// read-only. A disabled owner's subscribed rule preserves a plant of this
+    /// type already at the position or settling there, but does not authorize a new planting.
     #[hook(
         side = "server",
         contract = "replace",
         out = "may",
         scope = "block",
+        inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on",
         neoforge = "IBlockExtension.canSustainPlant"

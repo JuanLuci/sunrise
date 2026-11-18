@@ -118,7 +118,7 @@ fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {
     );
     batch.sprite_region(
         atlas,
-        crate::title_edition::SPRITE,
+        "gui/title/edition",
         [(w / 2.0).floor() - 64.0, 30.0 + 44.0 - 7.0, 128.0, 14.0],
         128.0,
         16.0,

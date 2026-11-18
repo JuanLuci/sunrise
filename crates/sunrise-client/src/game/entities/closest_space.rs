@@ -1,30 +1,57 @@
 //! `LocalPlayer.moveTowardsClosestSpace`: the push out of a wall the player's body is in.
-use sunrise_client::{blocks::BlockFacts, motion::PlayerMotion, world::World};
+use sunrise_client::{collisions::SceneCollisions, motion::PlayerMotion, world::World};
+use sunrise_core::geometry::{Aabb, Axis, ShapeOp, Vec3, VoxelShape};
 use sunrise_core::position::BlockPos;
+use sunrise_world::{block_collision::BlockCollisionRegistry, suffocation::SuffocationRegistry};
 
 /// `LocalPlayer.moveTowardsClosestSpace` at the body's four corners (aiStep, unless a spectator or a
 /// passenger): a corner inside a suffocating block sets a 0.1 speed towards the nearest side that is
-/// free, on that side's axis; a later corner overwrites an earlier one. Suffocating is a full
-/// collision cube that is also a full render cube, as `in_wall` has it, outside the player's
-/// collision exclusions (#3717).
+/// free, on that side's axis; a later corner overwrites an earlier one. `suffocatesAt` is
+/// `collidesWithSuffocatingBlock` over the corner's column at the body's height: a block whose
+/// `isSuffocating` holds (a closed shulker box, ice, soul sand...) and whose collision shape meets
+/// it, outside the player's collision exclusions (#3717).
 pub(crate) fn closest_space_nudge(
     p: &PlayerMotion,
     world: &World,
-    facts: &BlockFacts,
+    collision: &BlockCollisionRegistry<'_>,
+    suffocation: &SuffocationRegistry<'_>,
 ) -> [Option<f64>; 2] {
-    use sunrise_core::geometry::Axis;
     let mut out = [None; 2];
     let body = p.bounds();
-    let (min_y, max_y) = (body.min(Axis::Y) + 1.0e-7, body.max(Axis::Y) - 1.0e-7);
-    let suffocates_at = |x: i32, z: i32| {
-        ((min_y.floor() as i32 - 1)..=(max_y.ceil() as i32 + 1)).any(|y| {
-            f64::from(y) < max_y
-                && f64::from(y + 1) > min_y
-                && !p.collision_exclusions.spares(BlockPos::new(x, y, z))
-                && {
-                    let f = facts.get(world.block(x, y, z));
-                    f.full_collision && f.solid_render
-                }
+    let mut scene = SceneCollisions {
+        world,
+        binding: collision,
+        subject: None,
+    };
+    let mut suffocates_at = |x: i32, z: i32| {
+        // `suffocatesAt`'s test area, deflated by 1e-7; the cells just above and below reach it
+        // only with a shape taller than its cell (a fence, a wall).
+        let (lo, hi) = (body.min(Axis::Y) + 1.0e-7, body.max(Axis::Y) - 1.0e-7);
+        let area = Aabb::new(
+            Vec3::new(f64::from(x) + 1.0e-7, lo, f64::from(z) + 1.0e-7),
+            Vec3::new(f64::from(x + 1) - 1.0e-7, hi, f64::from(z + 1) - 1.0e-7),
+        );
+        let Ok(area_shape) = VoxelShape::from_box(area) else {
+            return false;
+        };
+        ((lo.floor() as i32 - 1)..=(hi.floor() as i32 + 1)).any(|y| {
+            let at = [x, y, z];
+            if p.collision_exclusions.spares(BlockPos::new(x, y, z)) {
+                return false;
+            }
+            let state = world.block(x, y, z);
+            suffocation
+                .is_suffocating(&mut scene, state, at)
+                .unwrap_or(false)
+                && collision
+                    .collision_shape(&mut scene, state, at)
+                    .ok()
+                    .is_some_and(|shape| {
+                        shape
+                            .moved(Vec3::new(f64::from(x), f64::from(y), f64::from(z)))
+                            .join_is_not_empty(&area_shape, ShapeOp::AND)
+                            .unwrap_or(false)
+                    })
         })
     };
     let side = f64::from(p.dimensions.width) * 0.35;
@@ -60,4 +87,50 @@ pub(crate) fn closest_space_nudge(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use sunrise_client::motion::PlayerMotion;
+    use sunrise_core::geometry::Vec3;
+
+    /// `suffocatesAt` counts what `isSuffocating` counts, not only cubes that render solid: a
+    /// body in ice or a closed shulker box, walled in on three sides, is pushed out 0.1 a tick to
+    /// the free east; one in glass (`isSuffocating` never) is not.
+    #[test]
+    #[ignore = "daily"]
+    fn a_player_is_pushed_out_of_ice_and_a_closed_shulker_box_but_not_glass() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let mut chunk = sunrise_client::chunk::Chunk::empty(0, 0);
+            chunk.lit = true;
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for (block, want) in [
+                ("minecraft:ice", [Some(0.1), None]),
+                ("minecraft:shulker_box", [Some(0.1), None]),
+                ("minecraft:glass", [None, None]),
+            ] {
+                let state = registry.default_state(block).unwrap();
+                for y in 64..=65 {
+                    game.world.set(3, y, 5, state).unwrap();
+                    for (x, z) in [(2, 5), (3, 4), (3, 6)] {
+                        game.world.set(x, y, z, stone).unwrap();
+                    }
+                }
+                let body = PlayerMotion::new(game.motion, Vec3::new(3.5, 64.0, 5.5)).unwrap();
+                assert_eq!(
+                    super::closest_space_nudge(
+                        &body,
+                        &game.world,
+                        game.collision,
+                        game.level_suffocation(),
+                    ),
+                    want,
+                    "{block}"
+                );
+            }
+        });
+    }
 }

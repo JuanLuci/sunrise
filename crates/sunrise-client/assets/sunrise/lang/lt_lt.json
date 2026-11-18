@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vaizdas",
   "sunrise.studio.topbar.view_short": "Vaizdas",
   "sunrise.studio.unknown_server": "Nežinomas",
-  "sunrise.tempban.dedicated_required": "Laikini blokavimai reikalauja skirtojo serverio",
-  "sunrise.tempban.invalid_duration": "%s nėra trukmė: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Yra %s laikinas blokavimas (-ai):",
-  "sunrise.tempban.list.empty": "Laikinų blokavimų nėra",
-  "sunrise.tempban.list.entry": "%1$s buvo užblokuotas %2$s %3$s (iki %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s, iki %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Nesusijęs su „Mojang“ ar „Microsoft“."
 }

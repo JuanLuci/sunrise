@@ -67,6 +67,8 @@ pub struct StateFacts {
     pub instrument: u8,
     /// Index into `Behaviours::shapes`, or -1 for an uncached (dynamic) shape.
     pub shape: i32,
+    /// Column-offset limits for the declared default collision, not the cached metadata.
+    pub(crate) collision_offset: Option<(f32, f32)>,
 }
 
 impl StateFacts {
@@ -899,6 +901,10 @@ fn build_with_gameplay<G: GameplayStateSource>(
             push,
             instrument: instrument_index(row.get(8).and_then(Value::as_str).unwrap_or("HARP")),
             shape: shape_ids[id],
+            collision_offset: cached.offset_limits(
+                BlockStateId(id as u32),
+                crate::collision::ShapeChannel::Collision,
+            ),
         });
     }
 

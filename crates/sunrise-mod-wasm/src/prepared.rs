@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 // Input: slot, generation, existing ItemStack Wire bytes and prepared kind strings.
 // Reply: the validated (slot, generation) token.
-pub(crate) const PREPARE: u32 = 0xffff_ff10;
+pub(crate) const PREPARE: u64 = crate::boundary::PREPARED_PREPARE;
 // Input: slot, generation; empty reply.
-pub(crate) const RELEASE: u32 = 0xffff_ff11;
+pub(crate) const RELEASE: u64 = crate::boundary::PREPARED_RELEASE;
 // Matches the guest's PreparedSlots bound in sunrise-mod-api/src/wire/prepared.rs.
 const MAX_PREPARED_SLOTS: usize = 4096;
 static NEXT_GENERATION: AtomicU32 = AtomicU32::new(1);

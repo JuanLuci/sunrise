@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Tanaw",
   "sunrise.studio.topbar.view_short": "Tanaw",
   "sunrise.studio.unknown_server": "Hindi alam",
-  "sunrise.tempban.dedicated_required": "Kailangan ng dedicated server ang mga pansamantalang ban",
-  "sunrise.tempban.invalid_duration": "Ang %s ay hindi tagal: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "May %s pansamantalang ban:",
-  "sunrise.tempban.list.empty": "Walang pansamantalang ban",
-  "sunrise.tempban.list.entry": "%1$s ay na-ban ni %2$s %3$s (hanggang %4$s)",
-  "sunrise.tempban.success": "%1$s para sa %2$s, hanggang %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Hindi kaakibat sa Mojang o Microsoft"
 }

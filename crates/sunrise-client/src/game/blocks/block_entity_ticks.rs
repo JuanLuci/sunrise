@@ -400,14 +400,16 @@ impl Game<'_> {
             {
                 continue;
             }
-            let Some((kind, mod_type)) = this
-                .world
-                .block_entities
-                .get(&pos)
-                .and_then(TickedKind::with_type)
-            else {
+            let Some(entity) = this.world.block_entities.get(&pos) else {
                 continue;
             };
+            let Some((kind, mod_type)) = TickedKind::with_type(entity) else {
+                continue;
+            };
+            if matches!(entity, BlockEntity::Mod(m) if mod_api::__private::content_owner_disabled(m.id()))
+            {
+                continue;
+            }
             match slot.before(&mut BlockEntityTick {
                 game: this,
                 pos,

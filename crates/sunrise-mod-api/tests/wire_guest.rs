@@ -1,6 +1,6 @@
 //! The mod's side of the boundary, driven the way the game drives it, with no wasm.
 #![cfg(feature = "wasm-guest")]
-use mod_api::wire::{HOST_LOG, INIT, Writer, guest};
+use mod_api::wire::{INIT, Writer, guest};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -15,7 +15,7 @@ fn __sunrise_mod_hooks() -> Box<dyn mod_api::Hooks> {
     Box::new(Empty)
 }
 
-fn call(id: u32, input: &[u8]) -> Result<Vec<u8>, String> {
+fn call(id: u64, input: &[u8]) -> Result<Vec<u8>, String> {
     let at = guest::input(input.len());
     // SAFETY: `input` hands out a buffer of exactly this length.
     unsafe { std::ptr::copy_nonoverlapping(input.as_ptr(), at, input.len()) };
@@ -50,20 +50,23 @@ fn a_panic_in_the_games_answer_keeps_its_message_and_a_mods_panic_reaches_the_ga
     guest::set_transport(Some(Rc::new(move |id, _| {
         // Held across the answer, as a game holds its call context while it serves.
         let mut calls = game.borrow_mut();
-        calls.push(id);
-        if id != HOST_LOG {
+        calls.push(id.to_owned());
+        if !id.starts_with("protocol:log#") {
             panic!("the game refused call {id}");
         }
         Vec::new()
     })));
-    let refused = std::panic::catch_unwind(|| guest::host(7, Writer::new()))
+    let refused = std::panic::catch_unwind(|| guest::host_named("seven", Writer::new()))
         .err()
         .expect("the game's answer must panic");
     assert_eq!(
         refused.downcast_ref::<String>().map(String::as_str),
-        Some("the game refused call 7")
+        Some("the game refused call seven")
     );
     assert!(std::panic::catch_unwind(|| panic!("a mod's own panic")).is_err());
     guest::set_transport(None);
-    assert_eq!(*calls.borrow(), [7, HOST_LOG]);
+    let calls = calls.borrow();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0], "seven");
+    assert!(calls[1].starts_with("protocol:log#"), "{calls:?}");
 }

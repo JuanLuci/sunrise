@@ -131,6 +131,8 @@ pub(super) struct Level {
     biomes: HashMap<Pos, u16>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
+    /// Ender storage has one journal shared by player and menu writes.
+    ender_items: HashMap<u128, Vec<Option<ItemStack>>>,
     /// Synced player health and its unpublished update events before set_health.
     player_health: HashMap<u128, KeptPlayerHealth>,
     /// Mob health and synchronization dirtiness before set_health.
@@ -248,7 +250,6 @@ struct KeptMobHealth {
 
 #[derive(Clone)]
 struct KeptPlayer {
-    ender_items: Vec<Option<ItemStack>>,
     player_extra: Option<sunrise_core::nbt::Tag>,
     inventory: Vec<Option<ItemStack>>,
     armor: [Option<ItemStack>; 4],
@@ -267,7 +268,6 @@ enum KeptEquipment {
 
 #[derive(Clone)]
 struct KeptMenus {
-    ender_items: Vec<Option<ItemStack>>,
     craft_grid: [Option<ItemStack>; 4],
     native_menu: Vec<Option<ItemStack>>,
 }
@@ -551,6 +551,9 @@ impl Game<'_> {
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
                 }
+                for (uuid, kept) in level.ender_items {
+                    outer.ender_items.entry(uuid).or_insert(kept);
+                }
                 for (conn, kept) in level.menus {
                     outer.menus.entry(conn).or_insert(kept);
                 }
@@ -816,8 +819,11 @@ impl Game<'_> {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
+        level
+            .ender_items
+            .entry(uuid)
+            .or_insert_with(|| self.ender_items.clone());
         level.players.entry(uuid).or_insert_with(|| KeptPlayer {
-            ender_items: self.ender_items.clone(),
             player_extra: self.level.player_extra.clone(),
             inventory: self.inventory.clone(),
             armor: self.armor.clone(),
@@ -878,21 +884,30 @@ impl Game<'_> {
         let Some(level) = self.transactions.last() else {
             return;
         };
-        let Some(super::native_server::PlayerRead::Guest(g)) = self.player_handle_read(player)
-        else {
+        let Some(g) = self.native_menu_player(player) else {
             return;
         };
         let conn = g.conn;
         if level.menus.contains_key(&conn) {
             return;
         }
+        let uuid = player.uuid();
+        let ender = (!level.ender_items.contains_key(&uuid)).then(|| {
+            if self.lan_acting == Some(conn) {
+                self.ender_items.clone()
+            } else {
+                g.ender_items.clone()
+            }
+        });
         let kept = KeptMenus {
-            ender_items: g.ender_items.clone(),
             craft_grid: g.craft_grid.clone(),
             native_menu: g.native_menu.clone(),
         };
         if let Some(level) = self.transactions.last_mut() {
             level.menus.insert(conn, kept);
+            if let Some(ender) = ender {
+                level.ender_items.insert(uuid, ender);
+            }
         }
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
@@ -1287,7 +1302,6 @@ impl Game<'_> {
         if let Some(host) = self.lan.as_mut() {
             host.hub.guests.update_all(|g| {
                 if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
-                    g.ender_items.clone_from(&kept.ender_items);
                     g.craft_grid.clone_from(&kept.craft_grid);
                     g.native_menu.clone_from(&kept.native_menu);
                 }
@@ -1364,9 +1378,21 @@ impl Game<'_> {
             self.score.board.restore(saved);
             self.sync_score_registries();
         }
+        for (uuid, kept) in level.ender_items {
+            if self.native_acting_id() == uuid {
+                self.ender_items = kept;
+            } else if let Some(host) = self.lan.as_mut()
+                && let Some(index) = host
+                    .hub
+                    .guests
+                    .iter()
+                    .position(|g| g.placed && g.uuid == uuid)
+            {
+                host.hub.guests.update(index, |g| g.ender_items = kept);
+            }
+        }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
-                g.ender_items = kept.ender_items;
                 g.level.player_extra = kept.player_extra;
                 g.inventory = kept.inventory;
                 g.armor = kept.armor;

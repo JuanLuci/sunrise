@@ -1274,3 +1274,55 @@ fn a_called_trait_gaining_a_supertrait_that_breaks_dyn_breaks() {
         assert_eq!((id, c, what), ("trait:Host", class, vec![line]), "{bound}");
     }
 }
+
+#[test]
+fn removing_an_extension_tag_is_breaking_and_old_readers_ignore_the_collection() {
+    let empty = functions(vec![]);
+    let old = empty.clone().with_extension_tags(vec![ExtensionTag {
+        registry: "block".into(),
+        id: "sunrise:villager_secondary_poi/farmer".into(),
+        doc: "Additional secondary work blocks.".into(),
+    }]);
+    let removed = diff(&old, &empty);
+    assert_eq!(removed.verdict, Verdict::Breaking);
+    assert_eq!(
+        removed.changes[0].id,
+        "extension_tag:block/sunrise:villager_secondary_poi/farmer"
+    );
+    assert_eq!(removed.changes[0].kind, ChangeKind::Removed);
+    assert_ne!(old.hash, empty.hash);
+    let mut redocumented = old.clone();
+    redocumented.extension_tags[0].doc = "Clarified words.".into();
+    assert_eq!(diff(&old, &redocumented).verdict, Verdict::Identical);
+    assert_eq!(old.document_hash(), redocumented.document_hash());
+    // The pre-extension reader's document fields, with serde's normal unknown-field policy.
+    #[derive(serde::Deserialize)]
+    struct OldReader {
+        schema: u32,
+        hash: String,
+        hooks: Vec<Hook>,
+        traits: Vec<Trait>,
+        handles: Vec<Function>,
+        functions: Vec<Function>,
+        macros: Vec<Macro>,
+        types: Vec<Type>,
+        parts: Vec<Part>,
+        capabilities: Vec<Capability>,
+        behaviours: Vec<Behaviour>,
+    }
+    let text = serde_json::to_string(&old).unwrap();
+    let read: OldReader = serde_json::from_str(&text).unwrap();
+    assert_eq!(read.schema, SCHEMA);
+    assert_eq!(read.hash, old.hash);
+    assert!(
+        read.hooks.is_empty()
+            && read.traits.is_empty()
+            && read.handles.is_empty()
+            && read.functions.is_empty()
+            && read.macros.is_empty()
+            && read.types.is_empty()
+            && read.parts.is_empty()
+            && read.capabilities.is_empty()
+            && read.behaviours.is_empty()
+    );
+}

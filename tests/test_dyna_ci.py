@@ -1,5 +1,6 @@
 """Dyna's switch routes only supported, same-repository events to its pool."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+PARITY = ROOT / ".github/workflows/parity.yml"
 BASH = shutil.which("bash")
 POSIX_BASH = BASH is not None and not (
     os.name == "nt" and os.path.dirname(os.path.normcase(BASH)).endswith(os.path.normcase(r"\system32")))
@@ -248,8 +250,8 @@ class DynaRoutingTests(unittest.TestCase):
         # verify waits for the heavy gate (tools/ci/pr_gate.py); verify-static runs on every pull request.
         conditions = {
             id(runtime): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && "
-                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}",
-            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' && !inputs.parity }}",
+                         "(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') }}",
+            id(static): "${{ always() && !cancelled() && needs.changes.result != 'skipped' }}",
         }
         for block in (runtime, static):
             header, steps = block.split("    steps:\n", 1)
@@ -499,7 +501,7 @@ class DynaRoutingTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/telemetry-server.yml").read_text()
         self.assertEqual(triggers(workflow), {"workflow_dispatch"})
 
-    def test_schedule_only_dispatches_and_parity_only_runs_on_dispatch(self):
+    def test_schedule_only_dispatches_and_parity_has_no_gate_entry_point(self):
         from test_ci_runners import jobs, triggers
         workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
         self.assertEqual(triggers(workflow), {"pull_request", "push", "workflow_dispatch", "schedule"})
@@ -509,22 +511,23 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", dispatcher)
         self.assertIn('gh workflow run dyna-ci.yml --repo "$GITHUB_REPOSITORY" --ref main', dispatcher)
         self.assertIn("if: github.event_name != 'schedule'", blocks["changes"])
-        parity = blocks["vanilla-parity"]
-        self.assertIn("github.event_name == 'workflow_dispatch'", parity)
-        self.assertIn("github.repository == 'sunrise-org/sunrise'", parity)
+        self.assertNotIn("vanilla-parity", blocks)
+        workflows = ROOT / ".github/workflows"
+        gate = (workflows / "dyna-ci.yml").read_text()
+        self.assertNotIn("inputs.parity", gate)
+        self.assertNotIn("inputs.harnesses", gate)
+        callers = [path.name for path in workflows.glob("*.yml") if "uses: ./.github/workflows/parity.yml" in path.read_text()]
+        self.assertEqual(callers, ["daily.yml"])
+        self.assertNotIn("vanilla-parity", dict(jobs((workflows / "ci.yml").read_text())))
+        parity = dict(jobs(PARITY.read_text()))["vanilla-parity"]
         self.assertIn("runs-on: dyna-large", parity)
         self.assertIn("persist-credentials: false", parity)
-        # A parity dispatch on a pull request runs only this job, and never a fork's code beside the vanilla data.
-        self.assertIn("needs.changes.outputs.trusted == 'true'", parity)
-        self.assertIn("ref: ${{ needs.changes.outputs.pr_sha || github.sha }}", parity)
-        for name in ("lint", "verify", "verify-static", "format", "launcher", "pr-status"):
-            header = blocks[name].split("    steps:\n", 1)[0]
-            self.assertIn("!inputs.parity", header, name)
+        self.assertIn("ref: ${{ inputs.commit }}", parity)
 
-    def test_named_harnesses_client_lib_tests_are_built_before_the_harnesses(self):
+    def test_daily_harnesses_client_lib_tests_are_built_before_the_harnesses(self):
         from test_ci_runners import jobs
-        parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
-        step = parity.split("- name: Build the named harnesses' game probes\n", 1)[1]
+        parity = dict(jobs(PARITY.read_text()))["vanilla-parity"]
+        step = parity.split("- name: Build the daily harnesses' game probes\n", 1)[1]
         script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
         with tempfile.TemporaryDirectory() as temporary:
             tree, bin_dir = Path(temporary, "tree"), Path(temporary, "bin")
@@ -542,106 +545,85 @@ class DynaRoutingTests(unittest.TestCase):
             (tree / "tools" / "test_fast_parity.py").write_text(
                 'run(["cargo", "test", "--profile", "fast", "-p", "sunrise-client", "--lib", "z"])\n')
             env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                   "GITHUB_STEP_SUMMARY": str(Path(temporary, "summary"))}
-            def built(harnesses):
-                calls.unlink(missing_ok=True)
-                result = subprocess.run(["bash", "-e", "-c", script], cwd=tree, env={**env, "HARNESSES": harnesses},
-                                        capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                return calls.read_text().splitlines() if calls.exists() else []
-            self.assertEqual(built("game lib#2"), ["test --locked --no-run -p sunrise-client-lib --lib",
-                                                   "test --locked --no-run -p sunrise-client --lib"])
-            self.assertEqual(built("lib"), ["test --locked --no-run -p sunrise-client-lib --lib"])
-            self.assertEqual(built("fast"), [])
-            # damage_catalog, as it is: both lib tests, client-lib first.
-            shutil.copy(ROOT / "tools/test_damage_catalog_parity.py", tree / "tools")
-            self.assertEqual(built("damage_catalog"), ["test --locked --no-run -p sunrise-client-lib --lib",
-                                                       "test --locked --no-run -p sunrise-client --lib"])
+                   "PARITY_LOG_DIR": temporary}
+            subprocess.run(["bash", "-e", "-c", script], cwd=tree, env=env, check=True)
+            self.assertEqual(calls.read_text().splitlines(), ["test --locked --no-run -p sunrise-client-lib --lib",
+                                                             "test --locked --no-run -p sunrise-client --lib"])
 
-    def test_parity_output_stays_on_the_runner_whatever_the_tested_tree_holds(self):
-        from test_ci_runners import jobs
-        parity = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["vanilla-parity"]
-        # The helper comes from the workflow's revision: nothing on PATH is taken from the checkout.
-        self.assertNotIn("$GITHUB_WORKSPACE/tools", parity)
-        # A link an older job left on the persistent slot is replaced, never written through.
-        self.assertLess(parity.index('rm -f "$DYNA_CI_BUILD/bin/python"'), parity.index('cat > "$DYNA_CI_BUILD/bin/python"'))
-        helper = textwrap.dedent(parity.split("<<'SH'\n", 1)[1].split("\n          SH\n", 1)[0])
-        with tempfile.TemporaryDirectory() as temporary:
-            build, tree = Path(temporary, "build"), Path(temporary, "tree")
-            (build / "bin").mkdir(parents=True)
-            (tree / "tools").mkdir(parents=True)
-            shim = build / "bin" / "python"
-            shim.write_text(helper)
-            shim.chmod(0o755)
-            # An older tree's harness and parity.py stream mismatches (vanilla's values), unindented too.
-            (tree / "tools" / "test_old_parity.py").write_text(
-                "import sys\nprint('mismatch: vanilla 0.7231')\nprint('vanilla 9', file=sys.stderr)\n"
-                "print('test lan::tests::datapack_damage_x ... FAILED')\n"
-                "print('  process didn\\'t exit successfully: `/t/deps/sunrise_client-0a1b vanilla` (signal: 9, SIGKILL: kill)')\n"
-                "sys.exit(3)\n")
-            (tree / "tools" / "parity.py").write_text(
-                "import sys\nprint('PASS loot_a 3s')\nprint('vanilla 0.7231')\n"
-                "print('FAIL loot_b 2s  (log)')\nprint('    vanilla 9')\nsys.exit(1)\n")
-            # tools/parity.py's own log of each harness; the failing one's is kept past the slot's reuse.
-            logs = tree / ".local" / "parity-runner" / "logs"
-            logs.mkdir(parents=True)
-            (logs / "loot_a.log").write_text("passed\n")
-            # Its build was killed: the cause is printed from Cargo's fixed forms, never the values around them.
-            (logs / "loot_b.log").write_text(
-                "vanilla 9\n"
-                "error: could not compile `sunrise-client-lib` (lib test)\n"
-                "Caused by:\n"
-                "  process didn't exit successfully: `/x/rustc --crate-name sunrise_client_lib --edition=2024 "
-                "--cfg 'feature=\"vanilla 0.7231\"'` (signal: 9, SIGKILL: kill)\n"
-                "vanilla 0.7231 (signal: 9, SIGKILL: kill)\n"
-                "test vanilla_0.7231 ... FAILED\n"
-                "thread 'main' panicked at crates/a/src/b.rs:12:5:\nvanilla 0.7231\n")
-            env = {**os.environ, "DYNA_CI_BUILD": str(build), "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "1",
-                   "RUNNER_NAME": "slot-1", "GITHUB_WORKSPACE": str(tree)}
-            harness = subprocess.run([str(shim), "tools/test_old_parity.py"], cwd=tree, env=env,
-                                     capture_output=True, text=True)
-            runner = subprocess.run([str(shim), "tools/parity.py", "loot_a", "loot_b"], cwd=tree, env=env,
-                                    capture_output=True, text=True)
-            self.assertEqual(harness.returncode, 3)
-            self.assertEqual(runner.returncode, 1)
-            for result in (harness, runner):
-                self.assertNotIn("vanilla", result.stdout + result.stderr)
-            self.assertIn("FAIL test_old_parity (exit 3", harness.stdout)
-            self.assertEqual(runner.stdout.splitlines()[:2], ["PASS loot_a", "FAIL loot_b"])
-            self.assertEqual(runner.stdout.splitlines()[2:5], [
-                "  loot_b: could not compile sunrise-client-lib (lib test)",
-                "  loot_b: rustc for sunrise_client_lib killed by signal 9 (SIGKILL)",
-                "  loot_b: panicked at crates/a/src/b.rs:12:5"])
-            self.assertEqual(harness.stdout.splitlines()[:2], [
-                "  test_old_parity: test lan::tests::datapack_damage_x FAILED",
-                "  test_old_parity: test binary sunrise_client killed by signal 9 (SIGKILL)"])
-            self.assertIn("mismatch: vanilla 0.7231", (build / "parity-logs" / "test_old_parity.log").read_text())
-            kept = build / "parity-keep" / "77-1"
-            self.assertEqual(sorted(p.name for p in kept.iterdir()), ["loot_b.log", "parity.log", "test_old_parity.log"])
-            self.assertIn(f"kept on runner slot-1 in {kept}", harness.stdout)
-            # A rerun keeps the run id: the second attempt's logs go beside the first's, not over them.
-            first = {name: (kept / name).read_bytes() for name in ("parity.log", "loot_b.log")}
-            (tree / "tools" / "parity.py").write_text("import sys\nprint('FAIL loot_b 4s  (log)')\nsys.exit(1)\n")
-            (logs / "loot_b.log").write_text("second attempt\n")
-            rerun = subprocess.run([str(shim), "tools/parity.py", "loot_b"], cwd=tree,
-                                   env={**env, "GITHUB_RUN_ATTEMPT": "2"}, capture_output=True, text=True)
-            self.assertEqual(rerun.returncode, 1)
-            self.assertEqual(sorted(p.name for p in (build / "parity-keep").iterdir()), ["77-1", "77-2"])
-            self.assertEqual({name: (kept / name).read_bytes() for name in first}, first)
-            self.assertEqual((build / "parity-keep" / "77-2" / "loot_b.log").read_text(), "second attempt\n")
-            # A harness that failed once and passed its retry: the run passes, and its first run's log is kept.
-            (tree / "tools" / "parity.py").write_text(
-                "import sys\nprint('PASS menu_click 5s')\n"
-                "print('RETRIED menu_click: failed, then passed on its one retry (vanilla 0.7231)')\nsys.exit(0)\n")
-            (logs / "menu_click.first-run.log").write_text("mismatch: vanilla 0.7231\n")
-            retried = subprocess.run([str(shim), "tools/parity.py", "menu_click"], cwd=tree,
-                                     env={**env, "GITHUB_RUN_ID": "78"}, capture_output=True, text=True)
-            self.assertEqual(retried.returncode, 0)
-            self.assertNotIn("vanilla", retried.stdout + retried.stderr)
-            kept_first = build / "parity-keep" / "78-1"
-            self.assertEqual(sorted(p.name for p in kept_first.iterdir()), ["menu_click.first-run.log"])
-            self.assertIn(f"menu_click: its first run's log is kept on runner slot-1 in {kept_first}", retried.stdout)
-            self.assertEqual(retried.stdout.splitlines()[-1], "PASS parity")
+class ParityWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        from test_ci_concurrency import yaml
+        self.steps = {step.get("name"): step for step in
+                      yaml.load(PARITY.read_text(), Loader=yaml.BaseLoader)["jobs"]["vanilla-parity"]["steps"]}
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.env = {**os.environ, "DYNA_CI_BUILD": str(self.root), "RUNNER_TEMP": str(self.root),
+                    "GITHUB_ENV": str(self.root / "env"), "GITHUB_STEP_SUMMARY": str(self.root / "public-summary"),
+                    "GITHUB_RUN_ID": "77", "GITHUB_RUN_ATTEMPT": "2", "COMMIT": "current"}
+        ci = self.root / "tools/ci"
+        ci.mkdir(parents=True)
+        shutil.copy(ROOT / "tools/ci/parity_verdict.py", ci)
+        self.slot = self.root / "parity-keep/77-2"
+
+    def step(self, name):
+        return subprocess.run(["bash", "-e", "-c", self.steps[name]["run"]], cwd=self.root, env=self.env,
+                              capture_output=True, text=True)
+
+    def initialise(self):
+        result = self.step("Start a fresh private log directory for this attempt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env.update([line.split("=", 1) for line in (self.root / "env").read_text().splitlines()])
+        self.assertEqual(Path(self.env["PARITY_LOG_DIR"]), self.slot)
+
+    def test_an_early_failure_cannot_report_a_previous_slots_result(self):
+        # Both an older attempt and stale state in the current directory survive until the first workflow step.
+        for path in (self.slot.with_name("77-1"), self.slot):
+            path.mkdir(parents=True)
+            (path / "parity.log").write_text("FAIL loot_old 3s\n0 passed, 1 failed in 1.0 min.\n")
+            (path / "selection.json").write_text('["loot_old"]')
+            (path / "exit").write_text("1\n")
+        self.initialise()
+        self.assertFalse((self.slot / "parity.log").exists())
+        self.assertTrue((self.slot.with_name("77-1") / "parity.log").exists())
+        # A setup step failed before any harness could run. The always() reporter still runs.
+        self.assertEqual(self.steps["Write the harnesses' verdict"]["if"], "always()")
+        result = self.step("Write the harnesses' verdict")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        report = json.loads((self.root / "parity.json").read_text())
+        self.assertEqual(report, {"passed": [], "failed": [], "complete": False,
+                                  "scope": {"run_id": "77", "run_attempt": "2", "commit": "current"}})
+        self.assertEqual(self.steps["Upload the harnesses' verdict"]["with"]["name"],
+                         "daily-report-parity-${{ github.run_attempt }}")
+
+    def test_parity_public_output_is_names_and_results_only(self):
+        self.initialise()
+        (self.root / "tools/parity.py").write_text(
+            "import os, sys\nfrom pathlib import Path\n"
+            "assert {'--all', '--skip-named-only'} <= set(sys.argv)\n"
+            "Path(sys.argv[-1]).write_text('[\"loot_a\", \"loot_b\"]')\n"
+            "Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('private retry reason')\n"
+            "print('PASS loot_a 3s')\nprint('FAIL loot_b 2s  (private path)')\n"
+            "print('PASS private_value 2s')\nprint('RETRIED loot_b: private retry reason')\n"
+            "print('1 passed, 1 failed in 1.0 min.')\nprint('private mismatch', file=sys.stderr)\nsys.exit(1)\n")
+        logs = self.root / ".local/parity-runner/logs"
+        logs.mkdir(parents=True)
+        (logs / "loot_b.log").write_text("private mismatch")
+        (logs / "loot_a.first-run.log").write_text("private retry reason")
+        result = self.step("Run every automatic harness")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.splitlines(), ["Parity exited 1"])
+        self.assertEqual(result.stderr, "")
+        result = self.step("Write the harnesses' verdict")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["PASS loot_a", "FAIL loot_b"])
+        self.assertEqual(result.stderr, "")
+        self.assertFalse((self.root / "public-summary").exists())
+        self.assertIn("private mismatch", (self.slot / "parity.log").read_text())
+        self.assertEqual((self.slot / "loot_b.log").read_text(), "private mismatch")
+        self.assertEqual((self.slot / "loot_a.first-run.log").read_text(), "private retry reason")
+        self.assertEqual((self.root / "parity-private-summary").read_text(), "private retry reason")
 
 
 if __name__ == "__main__":

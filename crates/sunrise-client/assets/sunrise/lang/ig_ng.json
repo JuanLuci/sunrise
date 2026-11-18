@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Nlele",
   "sunrise.studio.topbar.view_short": "Nlele",
   "sunrise.studio.unknown_server": "Amaghị",
-  "sunrise.tempban.dedicated_required": "Mmachibido nwa oge chọrọ sava dị iche",
-  "sunrise.tempban.invalid_duration": "%s abụghị oge: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Enwere mmachibido nwa oge %s:",
-  "sunrise.tempban.list.empty": "Enweghị mmachibido nwa oge",
-  "sunrise.tempban.list.entry": "E machibidoro %1$s site n'aka %2$s %3$s (ruo %4$s)",
-  "sunrise.tempban.success": "%1$s maka %2$s, ruo %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Enweghị njikọ na Mojang ma ọ bụ Microsoft"
 }

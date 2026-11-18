@@ -176,6 +176,7 @@ pub(super) fn build(
     root: &Path,
     catalog: Option<&Path>,
     additional: &[PathBuf],
+    api: Option<&mod_surface::Surface>,
 ) -> Result<(), String> {
     let root = dunce::canonicalize(root).map_err(|e| e.to_string())?;
     let toolchain = toolchain()?;
@@ -567,7 +568,7 @@ pub(super) fn build(
     }
     for member in &members {
         // A group member packs no uses table yet, so it counts as made for its build only.
-        crate::pack_into(&member.root, &target, None)?;
+        crate::pack_into(&member.root, &target, None, api)?;
     }
     Ok(())
 }

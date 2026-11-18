@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "ხედი",
   "sunrise.studio.topbar.view_short": "ხედი",
   "sunrise.studio.unknown_server": "უცნობი",
-  "sunrise.tempban.dedicated_required": "დროებითი ბლოკირება მხოლოდ გამოყოფილ სერვერზე მუშაობს",
-  "sunrise.tempban.invalid_duration": "%s ხანგრძლივობა არ არის: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "დროებითი ბლოკირება: %s",
-  "sunrise.tempban.list.empty": "დროებითი ბლოკირება არ არის",
-  "sunrise.tempban.list.entry": "%1$s დაბლოკა %2$s-მა %3$s (%4$s-მდე)",
-  "sunrise.tempban.success": "%1$s დაბლოკილია %2$s-ით, %3$s-მდე",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "არ არის დაკავშირებული Mojang-თან ან Microsoft-თან"
 }

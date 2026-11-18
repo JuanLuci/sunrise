@@ -16,8 +16,7 @@ use crate::{BlockState, EffectKey};
 /// `BaseFireBlock.fireIgnite` (with the level's random draw for a player), `LavaIgnite`
 /// ignites for 15 seconds, `Extinguish` is `clearFire`.
 // exhaustive: the closed serialized effect vocabulary and case order are a link contract.
-// no wire: manual codec in wire/wire_types.rs (a fixed case order the link contract pins).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub enum InsideEffect {
     /// `InsideBlockEffectType.FREEZE`: powder snow's frost, one frozen tick a step.
     Freeze,
@@ -51,8 +50,7 @@ const EFFECT_ORDER: [InsideEffect; 5] = [
 /// mob effects a wither rose and an eyeblossom add. A portal is not a write a part
 /// makes: it stays the game's own.
 // exhaustive: the closed serialized write vocabulary and case order are a link contract.
-// no wire: manual codec in wire/wire_types.rs (a fixed case order the link contract pins).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub enum EntityWrite {
     /// Add to the entity's movement (`entity.push`), as a bubble column does.
     Push([f64; 3]),
@@ -141,8 +139,7 @@ pub enum InsideWrite {
 /// One planned item of the flush: an effect, or an entity write that runs before or
 /// after one.
 // exhaustive: the closed serialized plan vocabulary and case order are a link contract.
-// no wire: manual codec in wire/wire_types.rs (the flushed plan crosses as its ordered items).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub enum PlannedInside {
     /// An [`InsideEffect`] applied to the swept entity.
     Effect(InsideEffect),
@@ -157,8 +154,7 @@ pub enum PlannedInside {
 /// reached them, and [`InsideEffects::take_planned`] hands the whole ordered plan to the
 /// entity's own tick, which stops applying at the first item after the entity dies.
 // exhaustive: the collector's state is private to the crate; a part only calls its methods.
-// no wire: manual codec in wire/wire_types.rs (the collector crosses as its pending steps and plan).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, sunrise_mod_api_macros::Wire)]
 pub struct InsideEffects {
     /// `lastStep`: the step the walk last advanced, `-1` before the first.
     pub(crate) last_step: i32,

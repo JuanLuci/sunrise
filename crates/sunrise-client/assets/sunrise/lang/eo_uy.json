@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vido",
   "sunrise.studio.topbar.view_short": "Vido",
   "sunrise.studio.unknown_server": "Nekonata",
-  "sunrise.tempban.dedicated_required": "Provizoraj malpermesoj bezonas dediĉitan servilon",
-  "sunrise.tempban.invalid_duration": "%s ne estas daŭro: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Estas %s provizora(j) malpermeso(j):",
-  "sunrise.tempban.list.empty": "Estas neniuj provizoraj malpermesoj",
-  "sunrise.tempban.list.entry": "%1$s estis malpermesita de %2$s %3$s (ĝis %4$s)",
-  "sunrise.tempban.success": "%1$s dum %2$s, ĝis %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ne aligita kun Mojang aŭ Microsoft"
 }

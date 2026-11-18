@@ -5,7 +5,7 @@ use sunrise_world::registry::BlockRegistry;
 
 /// A stone floor over the loaded 2x2 chunks (so a teleport finds ground),
 /// `under` below the mob's spot and `at` in it.
-fn build(
+pub(super) fn build(
     under: &'static str,
     at: &'static str,
 ) -> impl FnOnce(&mut crate::world::World, &BlockRegistry) {
@@ -32,7 +32,7 @@ fn build(
     }
 }
 
-fn enderman(types: &crate::mobs::MobTypes, seed: i64) -> Mob {
+pub(super) fn enderman(types: &crate::mobs::MobTypes, seed: i64) -> Mob {
     let kind = Arc::new(types.types["minecraft:enderman"].clone());
     let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
     register(&mut m);
@@ -124,7 +124,7 @@ fn a_burning_teleport_does_not_take_the_old_spots_fire_along() {
 
 /// How many generator steps (`next(bits)` calls: `next_double` is two)
 /// `start` took to reach `end`.
-fn steps(
+pub(super) fn steps(
     start: &sunrise_core::random::LegacyRandom,
     end: &sunrise_core::random::LegacyRandom,
 ) -> u32 {
@@ -842,9 +842,10 @@ fn a_campfire_and_a_berry_bush_hurt_teleport_inside_the_hurt() {
     }
 }
 
-/// #1697, through `finish_tick`: an enderman fully frozen on the 40-tick beat
-/// whose box takes in a cactus and powder snow is hurt by the cactus during the
-/// block walk, which may teleport it out of the snow. `isInPowderSnow`, set by
+/// #1697, through the block walk and freezing (`walk_and_freeze`): an enderman
+/// fully frozen on the 40-tick beat whose box takes in a cactus and powder snow
+/// is hurt by the cactus during the block walk, which may teleport it out of
+/// the snow. `isInPowderSnow`, set by
 /// the walk's FREEZE effect, still holds: it stays fully frozen, and the
 /// freeze hurt (refused by the cooldown) still draws its teleport chance, as
 /// the two hurts dealt one after the other.
@@ -871,11 +872,10 @@ fn the_walks_powder_snow_outlasts_a_teleport_out_of_it() {
                 for kind in [DamageKind::Cactus, DamageKind::Freeze] {
                     hurt(&mut expected, w, &mut Vec::new(), 1.0, Damage::of(kind));
                 }
-                finish_tick(
+                walk_and_freeze(
                     &mut m,
                     w,
                     &mut crate::health::TestLevel::new(0).level(),
-                    false,
                     &mut Vec::new(),
                 );
                 assert_eq!(m.last_damage.map(|(d, _)| d.kind), Some(DamageKind::Cactus));
@@ -898,8 +898,9 @@ fn the_walks_powder_snow_outlasts_a_teleport_out_of_it() {
     );
 }
 
-/// `Entity.baseTick` clears `isInPowderSnow` before the block walk: a mob that
-/// was in powder snow last tick and stands on stone now thaws by 2.
+/// `Entity.baseTick` clears `isInPowderSnow` (kept as `wasInPowderSnow`)
+/// before the block walk: a mob that was in powder snow last tick and stands
+/// on stone now thaws by 2.
 #[test]
 #[ignore = "daily"]
 fn powder_snow_from_last_tick_does_not_carry_over() {
@@ -912,13 +913,10 @@ fn powder_snow_from_last_tick_does_not_carry_over() {
                 m.previous = m.position;
                 m.in_powder_snow = true;
                 m.ticks_frozen = 100;
-                finish_tick(
-                    &mut m,
-                    w,
-                    &mut crate::health::TestLevel::new(0).level(),
-                    false,
-                    &mut Vec::new(),
-                );
+                let mut level = crate::health::TestLevel::new(0);
+                base_tick(&mut m, w, &mut level.level(), &mut Vec::new());
+                assert!(m.was_in_powder_snow, "kept as wasInPowderSnow");
+                walk_and_freeze(&mut m, w, &mut level.level(), &mut Vec::new());
                 assert!(!m.in_powder_snow);
                 assert_eq!(m.ticks_frozen, 98);
             },
@@ -945,11 +943,10 @@ fn a_move_through_powder_snow_freezes_a_zombie_that_ends_outside_it() {
             let mut m = Mob::new(5, kind, Vec3::new(3.5, 64.0, 0.5), 0.0);
             m.previous = Vec3::new(1.5, 64.0, 0.5);
             m.no_gravity = true;
-            finish_tick(
+            walk_and_freeze(
                 &mut m,
                 w,
                 &mut crate::health::TestLevel::new(0).level(),
-                false,
                 &mut Vec::new(),
             );
             assert!(m.in_powder_snow, "the move crossed powder snow");

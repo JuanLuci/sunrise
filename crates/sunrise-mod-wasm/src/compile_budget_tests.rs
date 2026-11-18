@@ -167,13 +167,14 @@ fn invalid_startup_settings_publish_and_report_refusals_on_both_sides() {
             let package = game.join("sunrise-mods/example");
             fs::create_dir_all(&package).unwrap();
             fs::create_dir_all(&player).unwrap();
-            let module = wat::parse_str(
+            let module = wat::parse_str(format!(
                 r#"(module
                 (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout"))
+                {log}
                 (func (export "sunrise_in"))
                 (func (export "sunrise_hook")))"#,
-            )
+                log = crate::imports::fixtures::log_import()
+            ))
             .unwrap();
             fs::write(package.join("mod.wasm"), &module).unwrap();
             fs::write(package.join("sunrise-mod.toml"), format!(

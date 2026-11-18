@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vue",
   "sunrise.studio.topbar.view_short": "Vue",
   "sunrise.studio.unknown_server": "Onbekannt",
-  "sunrise.tempban.dedicated_required": "Temporär Späre brauchen en dedizéierte Server",
-  "sunrise.tempban.invalid_duration": "%s ass keng Dauer: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Et gëtt %s temporär Spär(en):",
-  "sunrise.tempban.list.empty": "Et gëtt keng temporär Spären",
-  "sunrise.tempban.list.entry": "%1$s gouf vum %2$s %3$s gespaart (bis %4$s)",
-  "sunrise.tempban.success": "%1$s fir %2$s, bis %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Net verbonne mat Mojang oder Microsoft"
 }

@@ -54,10 +54,10 @@ def expression_value(expression, github, inputs=None, matrix=None):
 
 
 def concurrency_for(path, event, sha, number=None, ref="refs/heads/main", inputs=None, job=None,
-                    matrix=None, run_id="1"):
+                    matrix=None, run_id="1", run_attempt="1"):
     workflow = yaml.safe_load(path.read_text())
     policy = workflow["jobs"][job]["concurrency"] if job else workflow["concurrency"]
-    github = {"event_name": event, "sha": sha, "ref": ref, "run_id": run_id,
+    github = {"event_name": event, "sha": sha, "ref": ref, "run_id": run_id, "run_attempt": run_attempt,
               "event": {"pull_request": {"number": number or ""}}}
     if number is not None:
         github["ref"] = f"refs/pull/{number}/merge"
@@ -87,6 +87,14 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertNotEqual(snapshot[0], snapshot_again[0], "a gate dispatched on a main commit is never replaced")
         self.assertNotEqual(snapshot[0], concurrency_for(WORKFLOWS[0], "push", "c" * 40)[0])
         self.assertIs(snapshot[1], False)
+
+    def test_a_main_push_run_started_again_for_a_release_is_never_cancelled(self):
+        first = concurrency_for(WORKFLOWS[0], "push", "a" * 40)
+        again = concurrency_for(WORKFLOWS[0], "push", "a" * 40, run_attempt="2")
+        next_push = concurrency_for(WORKFLOWS[0], "push", "b" * 40)
+        self.assertNotEqual(again[0], next_push[0], "the next push does not cancel a release's gate")
+        self.assertNotEqual(again[0], first[0])
+        self.assertIs(again[1], False, "a release's gate never cancels a running main gate")
 
     def test_pr_updates_cancel_only_the_same_pr_group(self):
         for path in WORKFLOWS + [ROOT / ".github/workflows" / name for name in ("modding-book.yml", "dco.yml")]:

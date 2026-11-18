@@ -17,7 +17,8 @@ mod runtime_tests;
 mod threads_tests;
 use crate::{
     Refusal,
-    boundary::{Cx, Frame, serve},
+    boundary::{Cx, Frame},
+    imports::{Bound, resolve},
     link::{Group, Member},
 };
 use mod_api::{
@@ -126,7 +127,7 @@ pub(crate) struct State {
     depth: usize,
     /// The member each open crossing entered, as `(name slot, export id)`. A slot costs no
     /// refcount, so a successful crossing clones no name; only a depth refusal resolves them.
-    path: Vec<(usize, u32)>,
+    path: Vec<(usize, u64)>,
     /// The group's member names by slot, resolved only when a depth refusal is formatted.
     names: Vec<Arc<str>>,
     refusals: std::collections::HashSet<String>,
@@ -251,7 +252,7 @@ enum CallMode {
 }
 
 // Names are resolved once, outside dispatch. A contended payload only clones Arcs.
-static EXPORT_NAMES: std::sync::LazyLock<std::collections::HashMap<u32, Arc<str>>> =
+static EXPORT_NAMES: std::sync::LazyLock<std::collections::HashMap<u64, Arc<str>>> =
     std::sync::LazyLock::new(|| {
         crate::boundary::EXPORT_NAMES
             .iter()
@@ -279,7 +280,7 @@ struct Running {
 /// prints it, so a successful crossing does no lookup. A busy refusal names the export by id.
 struct Holder {
     module: Arc<str>,
-    export: u32,
+    export: u64,
     thread: Arc<str>,
     since: Instant,
 }
@@ -328,9 +329,9 @@ impl Running {
 }
 
 /// A depth refusal's open crossings, named from the group's table when the refusal is built.
-/// Its `Debug` prints exactly what a `Vec<(Arc<str>, u32)>` of the same path printed.
+/// Its `Debug` prints exactly what a `Vec<(Arc<str>, u64)>` of the same path printed.
 struct DepthPath<'a> {
-    path: &'a [(usize, u32)],
+    path: &'a [(usize, u64)],
     names: &'a [Arc<str>],
 }
 impl std::fmt::Debug for DepthPath<'_> {
@@ -459,14 +460,14 @@ pub struct WasmMod {
     slot: usize,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<u32, u64>,
+    hook: TypedFunc<u64, u64>,
     pub subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases<Id>>,
     prepared_releases: Arc<Releases<(u32, u32)>>,
     prepared: Arc<Mutex<crate::prepared::Slots>>,
-    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
-    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
+    prepared_entries: Arc<std::collections::HashMap<u64, TypedFunc<(), u64>>>,
+    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u64), &'static [Option<HookId>]>>>,
 }
 /// A guest object never owns the store that may itself retain that object.
 #[derive(Clone)]
@@ -475,14 +476,14 @@ pub(crate) struct WeakWasmMod {
     slot: usize,
     running: Weak<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<u32, u64>,
+    hook: TypedFunc<u64, u64>,
     subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases<Id>>,
     prepared_releases: Arc<Releases<(u32, u32)>>,
     prepared: Arc<Mutex<crate::prepared::Slots>>,
-    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
-    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
+    prepared_entries: Arc<std::collections::HashMap<u64, TypedFunc<(), u64>>>,
+    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u64), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
     pub(crate) fn equip_instance(&self) -> usize {
@@ -613,7 +614,7 @@ impl WeakWasmMod {
         &self,
         class: CallClass,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -624,7 +625,7 @@ impl WeakWasmMod {
     pub(crate) fn call_payload<R>(
         &self,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -681,7 +682,7 @@ impl WasmHandler {
     pub fn belongs_to(&self, module: &WasmMod) -> bool {
         self.module.running.ptr_eq(&Arc::downgrade(&module.running))
     }
-    pub fn subscriptions(&self, owner: &'static str, export_id: u32) -> &'static [Option<HookId>] {
+    pub fn subscriptions(&self, owner: &'static str, export_id: u64) -> &'static [Option<HookId>] {
         if let Some(value) = self
             .module
             .subscriptions
@@ -766,9 +767,47 @@ impl Drop for Resumed {
     }
 }
 
+/// What an import of a call the game serves does.
+#[derive(Clone, Copy)]
+enum Served {
+    /// A host call: the generated function that decodes, serves and encodes it.
+    Call(crate::boundary::Invoke),
+    /// The guest lets go of an object it held.
+    Release,
+    /// The guest sends the game a message (a panic's text).
+    Log,
+}
+
+/// The function a module's import of `sunrise` name `name` is bound to, which [`crate::imports`]
+/// has already found the game serves.
+fn bind(store: &mut Store<State>, name: &str) -> Option<Extern> {
+    Some(Extern::Func(match resolve(name).ok()? {
+        Bound::Call(invoke) => Func::wrap(
+            store,
+            move |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Call(invoke), ptr, len, out, cap)
+            },
+        ),
+        Bound::Release => Func::wrap(
+            store,
+            |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Release, ptr, len, out, cap)
+            },
+        ),
+        Bound::Log => Func::wrap(
+            store,
+            |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Log, ptr, len, out, cap)
+            },
+        ),
+        Bound::HostReply => Func::wrap(store, host_reply),
+        Bound::Mark => Func::wrap(store, || {}),
+    }))
+}
+
 fn host(
     mut caller: Caller<'_, State>,
-    id: u32,
+    served: Served,
     ptr: u32,
     len: u32,
     out: u32,
@@ -811,7 +850,7 @@ fn host(
         previous: LENT.get(),
     };
     LENT.set(&loan);
-    let result = if id == mod_api::wire::HOST_RELEASE {
+    let result = if matches!(served, Served::Release) {
         let mut reader = Reader::new(&input);
         let id = reader.take::<Id>()?;
         if !reader.rest().is_empty() {
@@ -822,7 +861,7 @@ fn host(
             .remove(id)
             .map(|_| ())
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
-    } else if id == mod_api::wire::HOST_LOG {
+    } else if matches!(served, Served::Log) {
         let mut reader = Reader::new(&input);
         let message: String = reader.take()?;
         if !reader.rest().is_empty() {
@@ -833,11 +872,13 @@ fn host(
             .ok_or_else(|| wasmtime::Error::msg("no calling module"))?;
         log::error!("wasm mod {module}: {message}");
         Ok(())
-    } else {
-        // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
+    } else if let Served::Call(invoke) = served {
+        // SAFETY: Cx is boxed and stable; the call must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
-        unsafe { serve(id, cx, &input, &mut reply) }
+        unsafe { invoke(cx, &input, &mut reply) }
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
+    } else {
+        unreachable!("every served kind is handled")
     };
     drop(loan);
     drop(resources);
@@ -942,6 +983,8 @@ impl WasmMod {
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         sunrise_guest_stack::check_current().map_err(|error| Refusal::Runtime(error.into()))?;
+        // The table of what the mods use against the game's, before anything is compiled or run.
+        crate::imports::check(members)?;
         std::sync::LazyLock::force(&EXPORT_NAMES);
         std::sync::LazyLock::force(&OUTSIDE_GUEST);
         let group: Vec<_> = members
@@ -966,11 +1009,7 @@ impl WasmMod {
             if module != "sunrise" {
                 return None;
             }
-            match name {
-                "host" => Some(Extern::Func(Func::wrap(store, host))),
-                "host_reply" => Some(Extern::Func(Func::wrap(store, host_reply))),
-                _ => None,
-            }
+            bind(store, name)
         })
         .map_err(Refusal::from_link)?;
         group.store.data_mut().memory = Some(group.memory);
@@ -978,42 +1017,12 @@ impl WasmMod {
         for (name, instance) in group.members.clone() {
             // The std member is a library, not a mod.
             if instance
-                .get_func(&mut group.store, "sunrise_layout")
+                .get_func(&mut group.store, "sunrise_hook")
                 .is_none()
             {
                 continue;
             }
             let load = |e: wasmtime::Error| Refusal::Runtime(format!("{e:#}"));
-            let layout = instance
-                .get_typed_func::<(), u64>(&mut group.store, "sunrise_layout")
-                .map_err(load)?
-                .call(&mut group.store, ())
-                .map_err(load)?;
-            if layout != *mod_api::wire::LAYOUT {
-                if layout == mod_api::wire_core_layout() {
-                    return Err(Refusal::Runtime("prepared can_equip ABI layout mismatch: guest carries the old unprepared layout; rebuild the wasm mod".into()));
-                }
-                return Err(Refusal::Layout {
-                    built: layout,
-                    game: *mod_api::wire::LAYOUT,
-                });
-            }
-            if instance
-                .get_func(&mut group.store, "sunrise_layout_ext")
-                .is_some()
-            {
-                let built = instance
-                    .get_typed_func::<(), u64>(&mut group.store, "sunrise_layout_ext")
-                    .map_err(load)?
-                    .call(&mut group.store, ())
-                    .map_err(load)?;
-                if built != mod_points::POINT_LAYOUT {
-                    return Err(Refusal::PointLayout {
-                        built,
-                        game: mod_points::POINT_LAYOUT,
-                    });
-                }
-            }
             let input = instance
                 .get_typed_func(&mut group.store, "sunrise_in")
                 .map_err(load)?;
@@ -1076,7 +1085,7 @@ impl WasmMod {
         &self,
         class: CallClass,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -1090,7 +1099,7 @@ impl WasmMod {
         &self,
         mode: CallMode,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -1378,7 +1387,7 @@ impl WasmMod {
     fn invoke(
         &self,
         store: &mut StoreContextMut<'_, State>,
-        id: u32,
+        id: u64,
         input: &Writer,
         output: &mut Vec<u8>,
     ) -> Result<(), CallError> {

@@ -53,16 +53,16 @@ fn module(reply: &Writer, depth: i32) -> sunrise_mod_wasm::WasmMod {
         (@custom "dylink.0" "\01\04\00\00\00\00")
         (import "env" "memory" (memory 1))
         (import "env" "__indirect_function_table" (table 1 funcref))
-        (func (export "sunrise_layout") (result i64) i64.const {})
+        {log}
         (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
         (func $recurse (param i32) (result i32)
             local.get 0 i32.eqz if (result i32) i32.const 0 else
             local.get 0 i32.const 1 i32.sub call $recurse i32.const 1 i32.add end)
-        (func (export "sunrise_hook") (param i32) (result i64)
+        (func (export "sunrise_hook") (param i64) (result i64)
             i32.const {depth} call $recurse i32.const 60000 i32.ne if unreachable end
-            {stores} i64.const {}))"#,
-        *mod_api::wire::LAYOUT,
-        (2048u64 << 32) | reply.bytes().len() as u64
+            {stores} i64.const {reply}))"#,
+        log = sunrise_mod_wasm::fixture::log_import(),
+        reply = (2048u64 << 32) | reply.bytes().len() as u64
     ))
     .unwrap();
     sunrise_mod_wasm::fixture::module(&bytes).unwrap()

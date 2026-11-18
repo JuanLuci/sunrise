@@ -4,6 +4,7 @@
 pub mod content;
 pub mod dependencies;
 pub mod enabled;
+pub mod extension_tags;
 pub mod game_identity;
 #[cfg(all(
     feature = "runtime-process",

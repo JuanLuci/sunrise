@@ -6,9 +6,7 @@
 use std::{fmt, sync::Arc};
 
 /// A spawner vanilla runs for every level (`MinecraftServer`'s custom spawners).
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SpawnerKind {
     /// `PhantomSpawner`: phantoms for players who have not slept.
@@ -56,9 +54,7 @@ impl TryFrom<String> for SpawnerKey {
 }
 
 /// One entry of a level's custom spawner list.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SpawnerEntry {
     /// One of vanilla's spawners.

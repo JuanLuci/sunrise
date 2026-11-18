@@ -19,12 +19,53 @@ object with `type` removed. `write` writes an equivalent JSON object for Sunrise
 client synchronization. Known serializers that refuse malformed data skip that
 recipe alone, with the file and serializer in the diagnostic.
 
-`matches`, `assemble` and `remaining_items` receive the decoded value and an owned
-`CraftingGrid`: width, height and row-major optional stacks, including empty
-cells. Callbacks must be pure and deterministic. The engine retains the owning
+`matches` and `assemble` take `&dyn LoopContext` before the decoded value and an
+owned `CraftingGrid`: width, height and row-major optional stacks, including empty
+cells. `remaining_items` instead takes `&dyn CraftingRemainders`, which extends
+`LoopContext` with `default_remainder(cell: u32) -> Option<ItemStack>`.
+Callbacks must be pure and deterministic. The engine retains the owning
 handler with its value. Counts must be 1 through 99; encoded values are limited
 to 1 MiB. Invalid result keys/counts refuse the result. Invalid remainder keys,
 counts or vector lengths use default item remainders.
+
+## Frozen tag reads and default remainders
+
+All three callbacks read the same owning resource generation's authoritative item
+tags with `is_in_tag(item, tag) -> Option<bool>`, `item_count(tag) -> Option<usize>`
+and `item_at(tag, index) -> Option<ItemKey>`. Count and index preserve the server's
+member order without allocating an iterator or member list. Reads allocate
+nothing and do no file I/O. `None` means tags or item keys are not ready (including
+client tags not yet synced); a matcher should then not match. Once loaded, an
+unknown tag returns `Some(false)` membership and `Some(0)` members; an out-of-range
+index returns `None`. Reload/sync publishes a new snapshot, not a mutable live tag
+service, so one callback cannot mix generations.
+
+`RegistrationContext` does **not** resolve `TagKey`s. Resolve an identifier through
+`host.tags().key(&id)` in a hook that supplies a `Host` (for example `tags_updated`),
+and retain the process-lifetime key in state shared with the registered kind.
+Matching can return false until that state has its key. Keep the key across
+reloads; only the generation's membership changes. Registration-time key
+resolution is not part of this API.
+
+`default_remainder(cell)` reads that cell's original, **pre-take** stack and runs
+the caller's existing default rule, including `ItemPart::crafting_remainder` on
+the server. Cell indices are zero-based row-major indices within the actual
+rectangular grid, not the engine's padded square. Empty and out-of-range cells
+return `None`. The result is an owned, component-bearing stack: unlike tag reads,
+this operation may allocate. It does not call the recipe kind recursively.
+
+A kind can mix defaults, custom stacks and no remainder in one result:
+
+```rust,ignore
+let mut result = vec![None; grid.cells.len()];
+result[0] = context.default_remainder(0);
+result[1] = Some(custom_stack);
+Some(result)
+```
+
+Returning `None` for the whole vector still requests the existing all-default
+behavior. Clients retain their data-only default prediction; the server remains
+authoritative for ItemPart behavior.
 
 The server rechecks the current grid before a take. It asks remainders once per
 take, including each shift-click iteration, before consuming inputs. A remainder

@@ -428,12 +428,13 @@ fn cast_fangs(m: &mut Mob, cx: &mut Cx) {
     }
 }
 /// `createSpellEntity`: the first block below `max_y` whose up face is
-/// sturdy, standing on the top of whatever collision shape is in the way.
+/// sturdy, standing on the top of whatever collision shape is in the way
+/// ([`super::MobWorld::collision_top`]: a published shape's, #1710).
 ///
 /// The floor test is `BlockState.isFaceSturdy(.., UP)`, not a full cube: a
 /// soul sand or mud block is 14/16 high and still supports a fang, where
 /// requiring a full collision shape drops the fang into the block.
-fn fang_floor(w: &super::MobWorld, x: f64, z: f64, min_y: f64, max_y: f64) -> Option<f64> {
+pub fn fang_floor(w: &super::MobWorld, x: f64, z: f64, min_y: f64, max_y: f64) -> Option<f64> {
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     let mut y = max_y.floor() as i32;
     while y >= min_y.floor() as i32 - 1 {
@@ -443,7 +444,7 @@ fn fang_floor(w: &super::MobWorld, x: f64, z: f64, min_y: f64, max_y: f64) -> Op
             let top = if w.facts.is_air(here) {
                 0.0
             } else {
-                f64::from(w.data.state(here).top)
+                w.collision_top(bx, y, bz)
             };
             return Some(f64::from(y) + top);
         }

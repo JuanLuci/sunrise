@@ -3,6 +3,7 @@
 //! entities for. A behaviour returns what is left in the slot and the level
 //! event it plays (`DefaultDispenseItemBehavior.dispense` then plays that
 //! event and the smoke animation, event 2000).
+use super::api_values::TryIntoApi;
 use super::level_sounds::LevelSound;
 use super::{Game, item_abilities::ability};
 use mod_api::SoundSource;
@@ -601,10 +602,11 @@ impl Game<'_> {
         stack: ItemStack,
     ) -> Result<Option<ItemStack>> {
         let mut answer = None;
-        if self.serving.is_some() || self.options.dedicated.is_some() {
+        let block_reply_state = if self.serving.is_some() || self.options.dedicated.is_some() {
             // The block the dispenser faces has the first say (`dispense_method`), then the
             // item's own part (`dispense_item`); the first answer wins.
             let front = self.block_at(offset(pos, facing));
+            let mut inert = false;
             self.native_dispense_method(
                 self.dim.id(),
                 [pos.0, pos.1, pos.2],
@@ -612,8 +614,14 @@ impl Game<'_> {
                 front,
                 &stack,
                 &mut answer,
+                &mut inert,
             );
-            if answer.is_none() {
+            if inert {
+                return Ok(Some(stack));
+            }
+            if answer.is_some() {
+                Some(front)
+            } else {
                 self.native_dispense_item(
                     self.dim.id(),
                     [pos.0, pos.1, pos.2],
@@ -621,8 +629,11 @@ impl Game<'_> {
                     &stack,
                     &mut answer,
                 );
+                None
             }
-        }
+        } else {
+            None
+        };
         if let Some((left, event)) = mod_dispensed(answer, self.items()) {
             if event == FAIL {
                 self.native_block_failed_dispense(
@@ -638,6 +649,16 @@ impl Game<'_> {
                 self.dispenser_event(2000, pos, data_value(facing));
             }
             return Ok(left);
+        }
+        // A rejected block reply may have short-circuited dispatch before the disabled owner.
+        // In that case keep the owner's inert fallback, not vanilla's dispenser behaviour.
+        if let Some(front) = block_reply_state
+            && mod_api::__private::any_mod_disabled()
+            && front.try_into_api().is_ok_and(|state| {
+                mod_api::__private::block_hook_inert(mod_api::HookId::DispenseMethod, state)
+            })
+        {
+            return Ok(Some(stack));
         }
         let item = stack.item.to_string();
         // A stack able to `shears_harvest` is dispensed as shears are, whatever its item.

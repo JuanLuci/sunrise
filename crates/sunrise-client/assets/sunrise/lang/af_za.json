@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Uitsig",
   "sunrise.studio.topbar.view_short": "Uitsig",
   "sunrise.studio.unknown_server": "Onbekend",
-  "sunrise.tempban.dedicated_required": "Tydelike verbannings vereis 'n toegewyde bediener",
-  "sunrise.tempban.invalid_duration": "%s is nie 'n duur nie: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Daar is %s tydelike banning(s):",
-  "sunrise.tempban.list.empty": "Daar is geen tydelike verbannings nie",
-  "sunrise.tempban.list.entry": "%1$s is deur %2$s verban %3$s (tot %4$s)",
-  "sunrise.tempban.success": "%1$s vir %2$s, tot %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Nie geaffilieer met Mojang of Microsoft nie"
 }

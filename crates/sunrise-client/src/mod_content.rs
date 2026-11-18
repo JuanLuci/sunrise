@@ -757,8 +757,12 @@ struct NewBlock<'a> {
     collision_shapes: Option<Vec<VoxelShape>>,
     /// Whether each shaped state contains fluid, including intrinsic template fluids.
     has_fluid: Vec<bool>,
+    /// Resolved per-state limits; template inheritance is resolved once at load.
+    offset_limits: Vec<Option<(f32, f32)>>,
     skylight: SkylightRule,
     custom_dampening: bool,
+    /// Fullness of the published occlusion shape when explicitly enabling occlusion.
+    template_occlusion_full: Vec<bool>,
     /// The template's `forceSolidOn` (`Some(true)`) or `forceSolidOff` (`Some(false)`), which keeps
     /// its answer over the declared shape's.
     force_solid: Option<bool>,
@@ -786,6 +790,17 @@ impl NewBlock<'_> {
             Some(item) => Some(item),
             None => (!self.decl.item && self.wall_of.is_none()).then_some("minecraft:air"),
         }
+    }
+
+    /// Vanilla caches occlusion using the outline at BlockPos.ZERO, not the block-local outline.
+    fn declared_occlusion(&self, index: usize, shape: &VoxelShape) -> VoxelShape {
+        self.offset_limits[index].map_or_else(
+            || shape.clone(),
+            |limits| {
+                let [x, y, z] = sunrise_core::random::column_offset(limits, 0, 0);
+                shape.moved(Vec3::new(x, y, z))
+            },
+        )
     }
 
     /// Template states and declared combinations in registry order.
@@ -1078,6 +1093,7 @@ impl<'a> Plan<'a> {
         // use the resolved state's fluid, not the template's cached dry answer.
         let mut skylight_rules = BTreeMap::new();
         let mut custom_dampening = BTreeSet::new();
+        let mut speleothems = BTreeSet::new();
         if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
@@ -1096,6 +1112,9 @@ impl<'a> Plan<'a> {
                         _ => None,
                     })
                     .collect();
+                if classes.contains(&"SpeleothemBlock") {
+                    speleothems.insert(name.clone());
+                }
                 if let Some(rule) = classes.iter().find_map(|class| match *class {
                     "BarrierBlock"
                     | "CrossCollisionBlock"
@@ -1135,7 +1154,10 @@ impl<'a> Plan<'a> {
                 }
             }
         }
-        let mut facts = read_json(&base.join("facts.json"))?;
+        let facts_path = base.join("facts.json");
+        let facts_bytes = fs::read(&facts_path)?;
+        let mut facts: J = serde_json::from_slice(&facts_bytes)
+            .map_err(|e| format!("{}: {e}", facts_path.display()))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
                 .iter()
@@ -1229,6 +1251,8 @@ impl<'a> Plan<'a> {
         let mut sorted: Vec<&ContentMod> = mods.iter().collect();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
         let mut wanted_sounds = Vec::new();
+        let template_registry = std::cell::OnceCell::new();
+        let mut template_occlusion = None;
         for m in &sorted {
             let mut declared: Vec<&Block> = m.content.blocks.iter().collect();
             declared.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1394,6 +1418,31 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let mut template_occlusion_full = Vec::new();
+                if decl.properties.occludes == Some(true) && shapes.is_none() {
+                    use sunrise_world::{
+                        collision::CachedCollisionRegistry,
+                        registry::{BlockRegistry, BlockStateId, BlockTableFile},
+                    };
+                    let cached = match &template_occlusion {
+                        Some(cached) => cached,
+                        None => {
+                            let (registry, _) = BlockRegistry::from_facts_json_bytes(&facts_bytes)?;
+                            let registry = template_registry.get_or_init(|| registry);
+                            let file = BlockTableFile::open(&base.join("occlusion.nbt"), registry)?;
+                            template_occlusion.insert(CachedCollisionRegistry::from_table(
+                                file.table("occlusion")?,
+                            )?)
+                        }
+                    };
+                    for &(state, _) in &order {
+                        let shape = cached
+                            .cached_shape(BlockStateId(states.start + state))?
+                            .ok_or("template has no published occlusion shape")?;
+                        template_occlusion_full
+                            .push(!shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?);
+                    }
+                }
                 let mut has_fluid = Vec::new();
                 if shapes.is_some() {
                     for &(state, combo) in &order {
@@ -1459,7 +1508,9 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    template_occlusion_full,
                     has_fluid,
+                    offset_limits: Vec::new(),
                     skylight: skylight_rules
                         .get(&decl.template)
                         .copied()
@@ -1514,6 +1565,43 @@ impl<'a> Plan<'a> {
         }
         let mut items = Vec::new();
         for b in &mut blocks {
+            let p = &b.decl.properties;
+            let inherited = crate::blocks::inherited_offset_limits(
+                &b.decl.template,
+                speleothems.contains(&b.decl.template),
+            );
+            b.offset_limits = b
+                .order
+                .iter()
+                .map(|(state, _)| {
+                    use sunrise_mod_package::content::OffsetType;
+                    let enabled = match p.offset {
+                        Some(OffsetType::None) => false,
+                        Some(_) => true,
+                        None => matches!(
+                            rows[(b.rename.states.start + state) as usize].get("offset"),
+                            Some(J::Bool(true))
+                        ),
+                    };
+                    enabled.then(|| {
+                        let defaults = match p.offset {
+                            Some(OffsetType::Xz) => (0.25, 0.0),
+                            Some(OffsetType::Xyz) => (0.25, 0.2),
+                            _ => inherited,
+                        };
+                        (
+                            p.max_horizontal_offset.unwrap_or(defaults.0),
+                            if p.offset == Some(OffsetType::Xz)
+                                || (p.offset.is_none() && inherited.1 == 0.0)
+                            {
+                                0.0
+                            } else {
+                                p.max_vertical_offset.unwrap_or(defaults.1)
+                            },
+                        )
+                    })
+                })
+                .collect();
             let row = &rows[b.rename.states.start as usize];
             b.item = match row.get("item") {
                 Some(J::Str(i)) if i != "minecraft:air" => Some(i.clone()),
@@ -1659,8 +1747,10 @@ impl<'a> Plan<'a> {
                             })
                             .collect();
                         // BlockState.initCache and BlockBehaviour.getLightDampening:
-                        // the declared outline is the block's occlusion shape.
-                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        // the occlusion shape uses the offset at the cache's origin.
+                        let occlusion = b.declared_occlusion(state_index, shape);
+                        let full =
+                            !occlusion.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
                         let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
                         let solid = can_occlude && full;
                         let down = match b.skylight {
@@ -1719,6 +1809,17 @@ impl<'a> Plan<'a> {
         row: &mut J,
     ) {
         let p = &b.decl.properties;
+        let offset = b.offset_limits[state_index];
+        row.set("offset", J::Bool(offset.is_some()));
+        if let Some((horizontal, vertical)) = offset {
+            row.set(
+                "offset_limits",
+                J::Arr(vec![J::f64(horizontal as f64), J::f64(vertical as f64)]),
+            );
+        }
+        if b.shapes.is_some() || p.offset == Some(sunrise_mod_package::content::OffsetType::None) {
+            row.set("outline_offset", J::Bool(offset.is_some()));
+        }
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
@@ -1734,6 +1835,20 @@ impl<'a> Plan<'a> {
         // `noOcclusion`: a block that can't occlude is never a solid render either, and a solid
         // render's full light dampening becomes a non-solid block's (`getLightDampening`: 0 when
         // skylight passes down, else 1, as for leaves and spawners).
+        if let Some(can_occlude) = p.occludes {
+            row.set("can_occlude", J::Bool(can_occlude));
+        }
+        if p.occludes == Some(true) && b.shapes.is_none() {
+            let solid = b.template_occlusion_full[state_index];
+            row.set("solid_render", J::Bool(solid));
+            if !b.custom_dampening {
+                let down = matches!(row.get("skylight_down"), Some(J::Bool(true)));
+                row.set(
+                    "dampening",
+                    J::Num((if solid { 15 } else { i64::from(!down) }).into()),
+                );
+            }
+        }
         if p.occludes == Some(false) {
             let solid = matches!(row.get("solid_render"), Some(J::Bool(true)));
             if solid {
@@ -1986,8 +2101,8 @@ impl<'a> Plan<'a> {
                         continue;
                     };
                     // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
-                    if !model && b.decl.properties.occludes == Some(false) {
-                        entry.set("can_occlude", J::Bool(false));
+                    if !model && let Some(can_occlude) = b.decl.properties.occludes {
+                        entry.set("can_occlude", J::Bool(can_occlude));
                     }
                     if model && let Some(schema) = entry.get_mut("schema") {
                         for (property_name, property) in &b.decl.state_properties {
@@ -2216,6 +2331,13 @@ impl<'a> Plan<'a> {
             if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
+                    let occlusion;
+                    let shape = if collision {
+                        shape
+                    } else {
+                        occlusion = block.declared_occlusion(offset, shape);
+                        &occlusion
+                    };
                     let key: Vec<_> = shape
                         .boxes()
                         .iter()
@@ -2281,6 +2403,51 @@ impl<'a> Plan<'a> {
         }
         if !contexts.is_empty() {
             root.insert("context_shapes".into(), Tag::List(contexts));
+        }
+        if collision {
+            let mut offsets = Vec::new();
+            for block in &self.blocks {
+                let mut channels = 0;
+                if block.shapes.is_some() || block.collision_shapes.is_some() {
+                    channels |= 1;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("collision_"))
+                {
+                    channels |= 2;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("outline_"))
+                {
+                    channels |= 4;
+                }
+                if block.context_shapes.contains_key("interaction") {
+                    channels |= 8;
+                }
+                if channels == 0 {
+                    continue;
+                }
+                for (index, limits) in block.offset_limits.iter().enumerate() {
+                    if let Some((horizontal, vertical)) = limits {
+                        offsets.push(Tag::compound([
+                            (
+                                "state",
+                                Tag::Int((block.rename.first as usize + index) as i32),
+                            ),
+                            ("channels", Tag::Byte(channels)),
+                            ("horizontal", Tag::Float(horizontal.to_bits())),
+                            ("vertical", Tag::Float(vertical.to_bits())),
+                        ]));
+                    }
+                }
+            }
+            if !offsets.is_empty() {
+                root.insert("shape_offsets".into(), Tag::List(offsets));
+            }
         }
         let Some(Tag::IntArray(mapping)) = root.get_mut(&JavaString::from("cached_shapes")) else {
             return Err("collision table has no mapping".into());
@@ -2403,10 +2570,10 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
-                        if b.decl.properties.occludes == Some(false)
+                        if let Some(can_occlude) = b.decl.properties.occludes
                             && let Tag::Byte(flags) = &mut v
                         {
-                            *flags &= !16;
+                            *flags = (*flags & !16) | if can_occlude { 16 } else { 0 };
                         }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "ມຸມມອງ",
   "sunrise.studio.topbar.view_short": "ມຸມມອງ",
   "sunrise.studio.unknown_server": "ບໍ່ຮູ້ຈັກ",
-  "sunrise.tempban.dedicated_required": "ການແບນຊົ່ວຄາວຕ້ອງການເຊີບເວີ dedicated",
-  "sunrise.tempban.invalid_duration": "%s ບໍ່ແມ່ນລະຍະເວລາ: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "ມີ %s ການແບນຊົ່ວຄາວ:",
-  "sunrise.tempban.list.empty": "ບໍ່ມີການແບນຊົ່ວຄາວ",
-  "sunrise.tempban.list.entry": "%1$s ຖືກແບນໂດຍ %2$s %3$s (ຈົນຮອດ %4$s)",
-  "sunrise.tempban.success": "%1$s ເປັນເວລາ %2$s, ຈົນຮອດ %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "ບໍ່ກ່ຽວຂ້ອງກັບ Mojang ຫຼື Microsoft"
 }

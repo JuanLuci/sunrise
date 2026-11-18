@@ -11,11 +11,14 @@ pub trait Hooks {
     /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
     /// the block's own rule doesn't run. The level is read-only. Asked on
     /// every shape update of such a block: keep it short.
+    /// A disabled owner's subscribed rule keeps that block type where it is already present
+    /// or settling after a piston move or fall, but refuses a new placement.
     #[hook(
         side = "server",
         contract = "replace",
         out = "survives",
         scope = "block",
+        inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_can_survive",
         neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)"

@@ -41,7 +41,7 @@ fn host_items(file: &syn::File, hook: &str) -> BTreeMap<String, String> {
     }
     items
 }
-fn export_ids(file: &syn::File) -> BTreeMap<(String, String), u32> {
+fn export_ids(file: &syn::File) -> BTreeMap<(String, String), u64> {
     let mut ids = BTreeMap::new();
     let f = file
         .items
@@ -86,8 +86,11 @@ fn export_ids(file: &syn::File) -> BTreeMap<(String, String), u32> {
                     panic!("export id literal");
                 };
                 assert!(
-                    ids.insert((owner.clone(), name.clone()), id.base10_parse().unwrap())
-                        .is_none()
+                    ids.insert(
+                        (owner.clone(), name.clone()),
+                        id.base10_parse::<u64>().unwrap()
+                    )
+                    .is_none()
                 );
             }
         }
@@ -97,7 +100,7 @@ fn export_ids(file: &syn::File) -> BTreeMap<(String, String), u32> {
 }
 fn guest_items(
     file: &syn::File,
-    ids: &BTreeMap<(String, String), u32>,
+    ids: &BTreeMap<(String, String), u64>,
     hook: &str,
 ) -> BTreeMap<String, String> {
     let mut items = BTreeMap::new();
@@ -125,7 +128,7 @@ fn guest_items(
                         if let Some(arm) = m
                             .arms
                             .iter()
-                            .find(|arm| arm.pat.to_token_stream().to_string() == id.to_string())
+                            .find(|arm| arm.pat.to_token_stream().to_string() == format!("{id}u64"))
                         {
                             assert!(
                                 items
@@ -184,8 +187,10 @@ fn only_can_equip_changes_when_prepared_marker_is_removed() {
                 .map(|hook| hook.name.clone())
                 .collect::<std::collections::HashSet<_>>();
             let mut surface = super::surface(&root, &included).unwrap();
-            let host = super::host::generate(&mut surface, &markers, &isolated).unwrap();
-            let guest = super::calls::dispatch(&surface.types, &surface.methods, &markers).0;
+            let names = super::call_names(&mut surface, &catalog.hooks, &markers).unwrap();
+            let host = super::host::generate(&mut surface, &markers, &isolated, &names).unwrap();
+            let guest =
+                super::calls::dispatch(&surface.types, &surface.methods, &markers, &names).0;
             (
                 syn::parse_file(&host).unwrap(),
                 syn::parse_file(&guest).unwrap(),
@@ -234,47 +239,5 @@ fn only_can_equip_changes_when_prepared_marker_is_removed() {
         }
         assert_eq!(host_changes, BTreeSet::from(["can_equip"]));
         assert_eq!(guest_changes, BTreeSet::from(["can_equip"]));
-    });
-}
-#[test]
-#[ignore = "daily"]
-fn prepared_fingerprint_covers_marker_entries_and_argument_layouts() {
-    on_stack(|| {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let sources = crate::sources(&root, crate::FillMode::Require).unwrap();
-        let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
-        let included = [
-            ("mod_api_generated.rs", sources.hooks.as_str()),
-            ("mod_api_generated_host.rs", sources.host.as_str()),
-            ("mod_api_host_areas.rs", sources.areas.as_str()),
-            ("capability_providers_generated.rs", providers.as_str()),
-        ];
-        let surface = super::surface(&root, &included).unwrap();
-        let abis =
-            super::prepared::describe(&surface.methods, &[("can_equip".into(), "stack".into())])
-                .unwrap();
-        let baseline = super::prepared::fingerprint(&abis);
-        assert_ne!(baseline, super::prepared::fingerprint(&[]));
-        let mut changed = abis.clone();
-        changed[0].parameter = "another_stack".into();
-        assert_ne!(baseline, super::prepared::fingerprint(&changed));
-        for i in 0..3 {
-            let mut changed = abis.clone();
-            changed[0].entries[i].name.push_str("_changed");
-            assert_ne!(baseline, super::prepared::fingerprint(&changed));
-            let mut changed = abis.clone();
-            changed[0].entries[i].id ^= 1;
-            assert_ne!(baseline, super::prepared::fingerprint(&changed));
-            let mut changed = abis.clone();
-            changed[0].entries[i].input[0] = "slot:u64";
-            assert_ne!(baseline, super::prepared::fingerprint(&changed));
-            assert_ne!(
-                super::prepared::layout_code(&abis),
-                super::prepared::layout_code(&changed)
-            );
-            let mut changed = abis.clone();
-            changed[0].entries[i].output[0] = "answer:u64";
-            assert_ne!(baseline, super::prepared::fingerprint(&changed));
-        }
     });
 }

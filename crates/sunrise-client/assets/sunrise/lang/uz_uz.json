@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Ko'rinish",
   "sunrise.studio.topbar.view_short": "Ko'rinish",
   "sunrise.studio.unknown_server": "Noma'lum",
-  "sunrise.tempban.dedicated_required": "Vaqtinchalik banlar uchun ajratilgan server kerak",
-  "sunrise.tempban.invalid_duration": "%s davr emas: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s ta vaqtinchalik ban bor:",
-  "sunrise.tempban.list.empty": "Vaqtinchalik banlar yo'q",
-  "sunrise.tempban.list.entry": "%1$s ni %2$s %3$s ban qildi (%4$s gacha)",
-  "sunrise.tempban.success": "%1$s %2$s ga, %3$s gacha",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang yoki Microsoft bilan bog'lanmagan"
 }

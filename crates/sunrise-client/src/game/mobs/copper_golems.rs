@@ -43,6 +43,10 @@ impl Game<'_> {
     /// the clients see the block event (`openerCountChanged`).
     pub(super) fn golem_chest_open(&mut self, chest: [i32; 3], open: bool, mob: u32) {
         let key = (chest[0], chest[1], chest[2]);
+        if self.mod_menu_at(key).is_some() {
+            self.mod_container_opener(key, open, Some(sunrise_client::mobs::Who::Mob(mob)), 3.0);
+            return;
+        }
         let entry = self.world.chest_openers.entry(key).or_insert((0, 0.0));
         let before = entry.0;
         if open {

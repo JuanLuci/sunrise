@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Күренеш",
   "sunrise.studio.topbar.view_short": "Күренеш",
   "sunrise.studio.unknown_server": "Билдәһеҙ",
-  "sunrise.tempban.dedicated_required": "Ваҡытлы бандар өсөн айырым сервер кәрәк",
-  "sunrise.tempban.invalid_duration": "%s оҙайлыҡ түгел: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s ваҡытлы бан бар:",
-  "sunrise.tempban.list.empty": "Ваҡытлы бандар юҡ",
-  "sunrise.tempban.list.entry": "%1$s %2$s тарафынан %3$s банланған (%4$s тиклем)",
-  "sunrise.tempban.success": "%1$s %2$s ваҡытҡа, %3$s тиклем",
-  "sunrise.tempban.usage": "/tempban <уйынсы> <оҙайлыҡ> [сәбәп]",
   "sunrise.title.not_affiliated": "Mojang йәки Microsoft менән бәйле түгел"
 }

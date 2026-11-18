@@ -230,6 +230,29 @@ fn main() {
         assert!(game.mining.is_none());
         assert!(game.remote.as_ref().unwrap().destroying.is_none());
     }
+    // A gradual break at A, then an instant break at B, then another at C: the instant
+    // break leaves A as the running target, so each later start aborts A again.
+    let mut game = Game::new(1.0, 1.0, false);
+    game.hit.pos = [1, 64, 0];
+    game.remote_mining(true);
+    game.res.speed = 60.0;
+    game.hit.pos = [2, 64, 0];
+    game.remote_mining(true);
+    assert_eq!(game.remote.as_ref().unwrap().destroying.map(|(p, _, _)| p), Some([1, 64, 0]));
+    assert!(game.remote.as_ref().unwrap().is_destroying);
+    game.hit.pos = [3, 64, 0];
+    game.remote_mining(true);
+    assert_eq!(
+        game.packets.iter().map(|p| (p.action, p.pos)).collect::<Vec<_>>(),
+        [
+            (0, [1, 64, 0]),
+            (2, [1, 64, 0]),
+            (0, [2, 64, 0]),
+            (2, [1, 64, 0]),
+            (0, [3, 64, 0]),
+        ]
+    );
+    assert_eq!(game.world.broken, [[2, 64, 0], [3, 64, 0]]);
 }
 '''.replace("METHOD", source[start:end].replace("pub(super) fn", "fn"))
         with tempfile.TemporaryDirectory(prefix="remote-mining-") as directory:

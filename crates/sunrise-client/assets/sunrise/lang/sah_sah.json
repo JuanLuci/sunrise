@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Көрүү",
   "sunrise.studio.topbar.view_short": "Көрүү",
   "sunrise.studio.unknown_server": "Биллибэт",
-  "sunrise.tempban.dedicated_required": "Быстах болдьохтоох бобууларга туспа сервер наада",
-  "sunrise.tempban.invalid_duration": "%s болдьох буолбатах: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s быстах болдьохтоох бобуу баар:",
-  "sunrise.tempban.list.empty": "Быстах болдьохтоох бобуулар суохтар",
-  "sunrise.tempban.list.entry": "%1$s %2$s %3$s боппут (%4$s диэри)",
-  "sunrise.tempban.success": "%1$s %2$s устата, %3$s диэри",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang эбэтэр Microsoft кытта сибээһэ суох"
 }

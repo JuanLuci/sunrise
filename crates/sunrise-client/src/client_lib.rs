@@ -41,7 +41,7 @@ pub use sunrise_client_render::{
     section_mask, server_terrain, settings, shader_options, shader_pack_list, signs, skins, social,
     sound_engine, sound_events, sound_preview, spans, split_layout, split_map, split_profiles,
     sprites, streaming, structure_block, tab_list, terrain_model, test_block, test_instance_block,
-    testgen, title_edition, trims, ui, vault, weather, widgets, world, worldborder, zip,
+    testgen, trims, ui, vault, weather, widgets, world, worldborder, zip,
 };
 pub mod attack_strength;
 pub mod attribute_updates;
@@ -107,6 +107,8 @@ pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
 pub mod move_gate;
+#[cfg(test)]
+mod test_game_dir;
 /// Game-owned JSON metadata conversion, shared by recipe and API adapters.
 pub use sunrise_core::json_nbt;
 pub mod lan;

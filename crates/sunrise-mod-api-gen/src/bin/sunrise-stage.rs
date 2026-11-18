@@ -25,7 +25,7 @@ use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, fits, uses_contai
 use std::path::PathBuf;
 use sunrise_mod_api_gen::staging::{self, Mode};
 
-fn surface(root: &std::path::Path, out: &std::path::Path) {
+fn surface(root: &std::path::Path, out: &std::path::Path, named: bool) {
     let started = std::time::Instant::now();
     // The generator writes source paths into `#[path]`s it then reads: they must be absolute.
     let root = match std::fs::canonicalize(root) {
@@ -35,7 +35,11 @@ fn surface(root: &std::path::Path, out: &std::path::Path) {
             std::process::exit(1);
         }
     };
-    let export = match sunrise_mod_api_gen::surface::export(&root) {
+    let export = match if named {
+        sunrise_mod_api_gen::surface::export(&root)
+    } else {
+        sunrise_mod_api_gen::surface::export_without_calls(&root)
+    } {
         Ok(export) => export,
         Err(error) => {
             eprintln!("sunrise-stage surface: {error}");
@@ -236,14 +240,19 @@ fn main() {
         Some("surface-diff") => surface_diff(&args[1..]),
         _ => {}
     }
-    if let [command, root, out] = &args[..]
+    if let [command, root, out, rest @ ..] = &args[..]
         && command == "surface"
+        && matches!(rest, [] | [_])
     {
-        return surface(root, out);
+        // `--without-calls`: a tree from before the call names, the old side of a comparison.
+        let without = rest.first().is_some_and(|flag| flag == "--without-calls");
+        if rest.is_empty() || without {
+            return surface(root, out, !without);
+        }
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };

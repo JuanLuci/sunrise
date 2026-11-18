@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Golwg",
   "sunrise.studio.topbar.view_short": "Golwg",
   "sunrise.studio.unknown_server": "Anhysbys",
-  "sunrise.tempban.dedicated_required": "Mae angen gweinydd pwrpasol ar waharddiadau dros dro",
-  "sunrise.tempban.invalid_duration": "Nid yw %s yn hyd amser: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Mae %s gwaharddiad dros dro:",
-  "sunrise.tempban.list.empty": "Nid oes unrhyw waharddiadau dros dro",
-  "sunrise.tempban.list.entry": "Gwaharddwyd %1$s gan %2$s %3$s (tan %4$s)",
-  "sunrise.tempban.success": "%1$s am %2$s, tan %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ddim yn gysylltiedig â Mojang na Microsoft"
 }

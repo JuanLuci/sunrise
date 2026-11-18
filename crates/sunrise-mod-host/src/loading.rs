@@ -46,6 +46,7 @@ pub fn main_with(
     sunrise_client::entry::start(
         native,
         |native, launch| {
+            sunrise_mod_wasm::set_game_build(crate::GAME_BUILD_ID);
             let mut wasm =
                 sunrise_mod_wasm::load_installed(launch, &sunrise_client::logging::player_dir());
             let mut mods = mods;

@@ -85,6 +85,16 @@ impl Game<'_> {
             }
         });
     }
+    /// `BlockItem.place`'s shrink of the stack it placed, and
+    /// `SolidBucketItem.useOn`'s `BucketItem.getEmptySuccessItem`: a placed
+    /// powder snow bucket leaves an empty bucket in that hand, unless the player
+    /// has infinite materials. The client predicts the same as the server does.
+    pub(super) fn consume_placed(&mut self, placed: &ItemStack) {
+        self.consume_held();
+        if &*placed.item == "minecraft:powder_snow_bucket" && !self.creative {
+            *self.held_mut() = Some(ItemStack::new("minecraft:bucket", 1));
+        }
+    }
     pub(super) fn tick_using(&mut self) {
         let Some(hand) = self.used_hand() else {
             return;

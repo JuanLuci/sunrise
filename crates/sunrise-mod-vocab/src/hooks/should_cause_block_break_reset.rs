@@ -5,8 +5,8 @@ pub trait Hooks {
     /// restart because the main hand changed? `stack` is the stack the break
     /// began with (vanilla's `destroyingItem`), `held` the main hand now
     /// (`None` for an empty hand). `reset` arrives with vanilla's answer: not
-    /// `ItemStack.isSameItemSameComponents(held, stack)` (count and damage
-    /// left out). `false` keeps the break and its progress going; `true`
+    /// `ItemStack.isSameItemSameComponents(held, stack)` (count left out,
+    /// damage compared). `false` keeps the break and its progress going; `true`
     /// aborts it and starts it again from 0. A `true` for an unchanged stack
     /// restarts the break every tick, so it never finishes. Asked on each
     /// `continueDestroyBlock` and `startDestroyBlock` of the block the break
@@ -15,6 +15,7 @@ pub trait Hooks {
     /// asked. Client-side.
     #[hook(
         side = "client",
+        version = 2,
         contract = "listen",
         scope = "item",
         key = "stack",

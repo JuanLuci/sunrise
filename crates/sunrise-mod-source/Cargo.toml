@@ -13,7 +13,7 @@ name = "mod_source"
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "2", features = ["full", "visit-mut"] }
 toml = "1.1"
 
 [dev-dependencies]

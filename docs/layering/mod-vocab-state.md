@@ -41,7 +41,6 @@ OUT_DIR file checked by the generator before writing it.
 
 | File and item | Type | Ownership | Reason |
 | --- | --- | --- | --- |
-| `@generated/wire_generated.rs::WIRE_LAYOUT` | `::std::sync::LazyLock<u64>` | immutable ABI layout fingerprint | Hash of the build-fixed Wire layouts; the generator validates its sole declaration and type before writing output. |
 | `__private/points.rs::OPEN` | `Mutex<Open>` | dispatch table | Temporary points exception pending #2697: open injection-listener routing and seal state remain in the unchanged points module. |
 | `block/fluid_capability.rs::BUCKET_IDS` | `std::sync::LazyLock<[crate::Identifier;3]>` | immutable lookup cache | Three vanilla bucket identifiers resolved once; no live registration or world state. |
 | `block/part_state.rs::EDITING` | `RefCell<Vec<(AttachmentHolder,&'staticstr,&'staticstr)>>` | reentrancy guard | Per-thread stack of the Part-state edits open on this thread, by holder, so an edit of the same holder and key from inside its own edit is refused. |
@@ -52,10 +51,10 @@ OUT_DIR file checked by the generator before writing it.
 | `client/particle_keys.rs::resolved::EMPTY` | `OnceLock<Particles>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `content/crash.rs::CURRENT_CRASH_OWNER` | `Cell<CrashOwner>` | crash owner | The one addition to #2587: call and frame ownership stay local to avoid indirect callbacks on every subscribed dispatch. |
 | `content/registry_keys.rs::ENCHANTMENTS` | `std::sync::LazyLock<std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,>` | Parts lookup table | Resolved engine registry identity lookup, replaced on registry reload; it stores installed slot mappings, not authoring requests. |
-| `content/registry_keys.rs::MENUS` | `std::sync::LazyLock<std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,>` | Parts lookup table | Resolved engine registry identity lookup, replaced on registry reload; it stores installed slot mappings, not authoring requests. |
 | `content/registry_keys.rs::resolved_block_keys::EMPTY` | `std::sync::OnceLock<Arc<sunrise_mod_runtime::block_definitions::Blocks>>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `content/registry_keys.rs::resolved_entity_types::EMPTY` | `std::sync::OnceLock<sunrise_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
 | `content/registry_keys.rs::resolved_items::EMPTY` | `std::sync::OnceLock<sunrise_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
+| `content/registry_keys.rs::resolved_menus::EMPTY` | `std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>` | Parts lookup table | Fallback menu identity lookup before Parts are installed. Installed loads own their menu tables, including fixture registration epochs. |
 | `content/registry_keys.rs::share_blocks::SHARED` | `std::sync::Mutex<Vec<Arc<sunrise_mod_runtime::block_definitions::Blocks>>>` | test-support | Test installations retain one resolved block table per distinct payload, shared by full equality, so repeated fixtures do not each keep a copy; production builds keep their one install's own table. |
 | `dispatch_scope.rs::BACKEND` | `OnceLock<Option<Backend>>` | set-once socket | Set-once platform callback registration; mutable platform storage lives above the engine. |
 | `parts/block_entities.rs::resolved_block_entity_types::EMPTY` | `OnceLock<sunrise_mod_runtime::registry_keys::Names>` | immutable cache | Empty or set-once resolved registry lookup returned when no installed Parts inventory supplies one. |
@@ -77,7 +76,6 @@ OUT_DIR file checked by the generator before writing it.
 | `runtime.rs::MODS` | `OnceLock<Installed>` | dispatch table | Dependency-ordered hook routing and its per-mod enabled bits remain engine-owned. |
 | `runtime.rs::MODS_SWITCHED` | `std::sync::atomic::AtomicU64` | dispatch table | Counts changes to the per-mod enabled bits it sits beside; read through the host's capability provider table, never by a guest's own copy. |
 | `runtime.rs::TEST_MODS` | `std::cell::Cell<Option<&'staticInstalled>>` | dispatch table | Thread-local dispatch inventory for isolated engine tests. |
-| `wire/mod.rs::RESOURCE_REACHED` | `std::cell::Cell<bool>` | reentrancy guard | Per-thread flag set while a Wire layout walk reaches a resource handle's codec, read by the Part state declaration's capability check. |
 | `wire/wire_resources.rs::ACCESS` | `OnceLock<ResourceAccess>` | set-once socket | Set-once platform callback registration; mutable platform storage lives above the engine. |
 | `wire/wire_resources.rs::shared::MARKER` | `std::sync::OnceLock<std::sync::Arc<Unsupported>>` | immutable cache | Shared immutable unsupported-resource marker with no writable payload. |
 | `world/server_reload.rs::first::ID` | `LazyLock<Identifier>` | immutable cache | Immutable vanilla reload-boundary identifier, allocated once and shared by anchor declarations. |

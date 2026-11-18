@@ -378,6 +378,14 @@ pub struct Anvil {
     pub repair_count: u32,
     /// `onlyRenaming`.
     pub only_renaming: bool,
+    /// An `AnvilScreen` listens: a client predicting a click with the screen open, whose
+    /// `slotChanged` hears each new input (`slotsChanged`'s `broadcastChanges`).
+    pub screen: bool,
+    /// The input the screen last heard of (`AbstractContainerMenu.lastSlots`).
+    pub seen_input: Option<ItemStack>,
+    /// The names the screen's `onNameChanged` sent while the click ran
+    /// (`ServerboundRenameItemPacket`), in order; they go out before the click.
+    pub renamed: Vec<String>,
 }
 
 /// An anvil menu before a click, for `Menu::anvil_cancel`: the anvil's three
@@ -786,6 +794,7 @@ impl Menu {
                 carried: None,
                 data: vec![0; data],
                 creative: false,
+                on_client: false,
                 selected: 0,
                 drops: Vec::new(),
                 dropped: Vec::new(),
@@ -1067,6 +1076,13 @@ impl Menu {
     /// `StonecutterMenu.setupResultSlot`.
     fn stone_setup_result(&mut self, env: &Env, index: i32) {
         self.touch();
+        // A client's SelectableRecipe entries carry no recipe (`entry.recipe().recipe()` is empty off the
+        // server): its result stays empty until the server's slot update, and a take refills nothing.
+        if self.state.on_client {
+            self.state.stone.used = None;
+            self.state.containers[RESULT][0] = None;
+            return;
+        }
         let recipe = usize::try_from(index)
             .ok()
             .and_then(|i| self.state.stone.recipes.get(i).copied());
@@ -1112,7 +1128,10 @@ impl Menu {
                 );
             }
             Kind::CrafterBlock => self.crafter_result(env),
-            Kind::Anvil => self.anvil_result(env),
+            Kind::Anvil => {
+                self.anvil_screen_heard(env);
+                self.anvil_result(env);
+            }
             Kind::Enchanting => self.enchant_changed(env),
             Kind::Smithing => {
                 self.smith_result(env);
@@ -1184,9 +1203,11 @@ impl Menu {
     /// `AnvilMenu.createResult`.
     fn anvil_result(&mut self, env: &Env) {
         self.touch();
+        // createResult compares the name with the input's getHoverName().getString(), which
+        // neither side's game resolves with a key only Sunrise gives.
         let hover = self.state.containers[MAIN][0]
             .as_ref()
-            .map(|i| crate::stations::hover_name(env.names, i))
+            .map(|i| crate::lang::returned_to_server(|| crate::stations::hover_name(env.names, i)))
             .unwrap_or_default();
         let out = crate::stations::anvil_result(
             env.enchantments,
@@ -1336,6 +1357,39 @@ impl Menu {
         true
     }
 
+    /// `AnvilScreen.slotChanged` for a new input, inside the click that changed it: the name
+    /// box takes the input's name, and `onNameChanged` gives the menu that name (blank for an
+    /// input with no custom name of its own), which takes it when it differs (`setItemName`).
+    fn anvil_screen_heard(&mut self, env: &Env) {
+        if !self.state.anvil.screen || self.state.containers[MAIN][0] == self.state.anvil.seen_input
+        {
+            return;
+        }
+        self.state.anvil.seen_input = self.state.containers[MAIN][0].clone();
+        let Some(input) = self.state.containers[MAIN][0].clone() else {
+            return;
+        };
+        // The box (an EditBox of 50) keeps the first 50 UTF-16 units of what it is given.
+        let name = if input.custom_name().is_some() {
+            // As vanilla's client names it: the name goes to the server.
+            let hover =
+                crate::lang::returned_to_server(|| crate::stations::hover_name(env.names, &input));
+            let mut units = 0;
+            hover
+                .chars()
+                .take_while(|c| {
+                    units += c.len_utf16();
+                    units <= 50
+                })
+                .collect()
+        } else {
+            String::new()
+        };
+        if self.rename(env, &name) {
+            self.state.anvil.renamed.push(name);
+        }
+    }
+
     pub fn rename(&mut self, env: &Env, name: &str) -> bool {
         self.touch();
         // StringUtil.filterText, then validateName's length limit.
@@ -1359,18 +1413,27 @@ impl Menu {
         true
     }
 
-    /// `SmithingMenu.createResult`.
+    /// `SmithingMenu.createResult`: a recipe is looked up only on a `ServerLevel`, so a server's
+    /// client finds none and leaves the result empty until the server's slot update.
     fn smith_result(&mut self, env: &Env) {
         self.touch();
+        if self.state.on_client {
+            self.state.containers[RESULT][0] = None;
+            return;
+        }
         let [a, b, c] = [0, 1, 2].map(|i| self.state.containers[MAIN][i].as_ref());
         self.state.containers[RESULT][0] =
             env.station_recipes
                 .smithing_result(env.loop_context, env.enchantments, a, b, c);
     }
 
-    /// `SmithingMenu.slotsChanged`'s `hasRecipeError`: every input filled and no result.
+    /// `SmithingMenu.slotsChanged`'s `hasRecipeError`: every input filled and no result, set on a
+    /// `ServerLevel` only (a client hears it as the menu's data).
     fn smith_error(&mut self) {
         self.touch();
+        if self.state.on_client {
+            return;
+        }
         let error = self.state.containers[MAIN].iter().all(Option::is_some)
             && self.state.containers[RESULT][0].is_none();
         self.state.data[0] = i32::from(error);
@@ -1963,7 +2026,7 @@ impl Menu {
     #[sunrise_mod_api_macros::replaceable]
     fn recompute(&mut self, env: &Env) {
         self.touch();
-        if self.state.grid_size == 0 {
+        if self.state.grid_size == 0 || self.state.on_client {
             return;
         }
         let result = env

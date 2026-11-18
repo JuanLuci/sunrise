@@ -9,10 +9,10 @@ sunrise_client_render::chunk::Section::unpack
 sunrise_client_render::fog::fog_type
 sunrise_client_render::font::Font::load
 sunrise_client_render::font::Font::take_patches
-sunrise_client_render::gfx::Renderer::draw_outline
-sunrise_client_render::gfx::Renderer::release_surface
 sunrise_client_render::gfx::Renderer::render
+sunrise_client_render::gfx::entity_draw::Renderer::draw_outline
 sunrise_client_render::gfx::stars::Stars::draw
+sunrise_client_render::gfx::surface_lifecycle::Renderer::release_surface
 sunrise_client_render::hud::HudBatch::fill
 sunrise_client_render::hud::HudBatch::rect_uv
 sunrise_client_render::menu_blur::MenuBlur::apply
@@ -54,8 +54,8 @@ sunrise_client_render::chat::ChatScreen
 sunrise_client_render::chat::ChatSource
 sunrise_client_render::chunk::Chunk
 sunrise_client_render::font::Font
-sunrise_client_render::gfx::Frame
 sunrise_client_render::gfx::Renderer
+sunrise_client_render::gfx::frame::Frame
 sunrise_client_render::gfx::pack_timing::PassTiming
 sunrise_client_render::hud::HudAtlas
 sunrise_client_render::hud::Rect

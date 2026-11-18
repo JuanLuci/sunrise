@@ -75,17 +75,20 @@ jobs:
       # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
       - name: Cap build parallelism to the runner
         run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
-      - name: Check fieldless Wire layout coverage and hashes
-        shell: bash
+      # The host-side tests below run from one build of the workspace's tests, verify's own command: one feature
+      # resolution for every package (the workspace's: sunrise-mod-wasm's listener-fixture, sunrise-mod-api's
+      # wasm-guest, ... are all on in it) and the host compiler cache verify fills. Each `cargo test -p PACKAGE
+      # --features ...` resolved its own variant of the shared crates and compiled it again, and the job ran past its
+      # 120 minutes in daily 44065326913 (#2288). `ignored_tests.py --prebuilt` runs a target's executable as
+      # `cargo test` would; mixed-output-fixture (never in the workspace) and the release bench still build their own.
+      - name: Build the workspace's tests once
+        continue-on-error: true  # a target it could not build fails where its tests run, by name
         run: |
-          python3 -m unittest tests.test_wire_enum_goldens
-          mkdir -p "$CARGO_TARGET_DIR/wire-goldens"
-          env -u RUSTC_WRAPPER RUSTC_BOOTSTRAP=1 cargo rustc --locked -p sunrise-mod-vocab --lib -- \
-            -Zunpretty=expanded > "$CARGO_TARGET_DIR/wire-goldens/expanded.rs"
-          python3 tools/generate_wire_enum_goldens.py \
-            --expanded "$CARGO_TARGET_DIR/wire-goldens/expanded.rs" --check
-          cargo test --locked -p sunrise-mod-vocab --lib existing_fieldless_enum_layouts_match_baseline
-          cargo test --locked -p sunrise-mod-api --test wire_math_profile
+          echo "WORKSPACE_TESTS=$RUNNER_TEMP/workspace-tests.json" >> "$GITHUB_ENV"
+          python3 tools/ci/ignored_tests.py --build-tests "$RUNNER_TEMP/workspace-tests.json"
+      - name: Wire math profile
+        run: |
+          python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" -p sunrise-mod-api --test wire_math_profile
       - name: Compile and test emitted point records
         run: |
           manifest=crates/sunrise-mod-point-shape/tests/record-wire/Cargo.toml
@@ -110,13 +113,14 @@ jobs:
           # so the daily summary files a failure here by test name; the step fails after them if any failed.
           failed=0
           verdict() { python3 tools/ci/cargo_test_verdict.py "$RUNNER_TEMP/daily-report-own.json" -- "$@" || failed=1; }
-          verdict cargo test -p sunrise-mod-api --features wasm-guest --lib guest_pool_
-          verdict cargo test -p sunrise-mod-api --features wasm-guest --lib phase_tests
-          verdict cargo test -p sunrise-mod-vocab --lib strict_math_seeded_reference_vectors_match_exact_bits
-          verdict cargo test -p sunrise-mod-wasm --features listener-fixture --test strict_math -- --ignored --nocapture
-          verdict cargo test -p sunrise-mod-points --features listener-fixture --test registry --test replace --test order
-          verdict cargo test -p sunrise-mod-wasm --features listener-fixture --no-fail-fast --test real_member --test unstaged --test self_refusal --test native_listener --test no_wire_registration --test capability_registration --test chunk_disk -- --include-ignored --nocapture
-          verdict cargo test -p sunrise-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
+          prebuilt() { verdict python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" "$@"; }
+          prebuilt -p sunrise-mod-api --lib -- guest_pool_
+          prebuilt -p sunrise-mod-api --lib -- phase_tests
+          prebuilt -p sunrise-mod-vocab --lib -- strict_math_seeded_reference_vectors_match_exact_bits
+          prebuilt -p sunrise-mod-wasm --test strict_math -- --ignored --nocapture
+          prebuilt -p sunrise-mod-points --test registry --test replace --test order
+          prebuilt -p sunrise-mod-wasm --test real_member --test unstaged --test self_refusal --test native_listener --test no_wire_registration --test capability_registration --test chunk_disk --test import_identity -- --include-ignored --nocapture --skip a_mod_built_before_the_break
+          prebuilt -p sunrise-mod-wasm --lib -- guest_input_pool_stays_flat_for_100k_no_import_calls --ignored --nocapture
           exit "$failed"
       - name: Build and test the isolated mixed-output boundary
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
@@ -166,7 +170,7 @@ jobs:
           # The tests are the `needs SUNRISE_WASM_FIXTURE` rows and the `daily ... wasm-fixture` rows (no shard has the
           # fixture); each run must report exactly one test passed.
           python3 tools/ci/ignored_tests.py --needs SUNRISE_WASM_FIXTURE --one-process-each --jobs "$jobs" \
-            --report "$RUNNER_TEMP/daily-report.json"
+            --binaries "$WORKSPACE_TESTS" --report "$RUNNER_TEMP/daily-report.json"
       # The tests' names and verdicts for the daily summary (cargo_test_verdict.py and ignored_tests.py --report); no
       # test output.
       - name: Upload the fixture tests' report
@@ -194,7 +198,7 @@ jobs:
           SUNRISE_WASM_LIBRARY: ${{ github.workspace }}/crates/sunrise-mod-wasm/tests/library-fixture/library/target/sunrise-mod/wasm_test_library.smod
           SUNRISE_WASM_OBSERVER: ${{ github.workspace }}/crates/sunrise-mod-wasm/tests/library-fixture/observer/target/sunrise-mod/wasm_test_observer.smod
           SUNRISE_WASM_DEPENDENT: ${{ github.workspace }}/crates/sunrise-mod-wasm/tests/library-fixture/dependent/target/sunrise-mod/wasm_test_dependent.smod
-        run: cargo test -p sunrise-mod-wasm --test real_library -- --nocapture
+        run: python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" -p sunrise-mod-wasm --test real_library -- --nocapture
       - name: Build the same-group capability members
         if: ${{ !cancelled() && steps.fixture.outcome == 'success' }}
         run: |
@@ -209,7 +213,7 @@ jobs:
         env:
           SUNRISE_WASM_STD: ${{ github.workspace }}/target/sunrise-wasm-std.wasm
           SUNRISE_WASM_GROUPS: ${{ github.workspace }}/crates/sunrise-mod-wasm/tests/groups
-        run: cargo test -p sunrise-mod-wasm --test groups -- --nocapture
+        run: python3 tools/ci/ignored_tests.py --prebuilt "$WORKSPACE_TESTS" -p sunrise-mod-wasm --test groups -- --nocapture
       # A hand dispatch only: the daily run (a call with its commit) does not measure.
       - name: Measure block entity boundary
         if: github.event_name == 'workflow_dispatch' && inputs.commit == ''

@@ -2,7 +2,8 @@
 """Run the vanilla differential harnesses (tools/test_*_parity.py) quickly.
 
     python3 tools/parity.py                 # harnesses whose inputs changed, or that never passed
-    python3 tools/parity.py --all           # every harness, from scratch (the audit)
+    python3 tools/parity.py --all           # every harness, from scratch
+    python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set, from scratch
     python3 tools/parity.py --fresh ...     # don't reuse vanilla oracle results
     python3 tools/parity.py food light      # these harnesses (names without test_/_parity.py)
     python3 tools/parity.py --failed        # the ones that failed last time
@@ -11,8 +12,8 @@
     python3 tools/parity.py --list          # what would run, without running it
     python3 tools/parity.py --status        # last result of every harness
 
-Harnesses in parity_hosts.json's "named_only" run only when named or with --all
-(the nightly audit): no automatic selection picks them.
+Harnesses in parity_hosts.json's "named_only" run only when named or with
+--all without --skip-named-only. The daily leaves them out.
 
 Each harness runs unmodified, in parallel, under a tracer that records what it
 read: its Python modules, Java oracle sources, other repository files, and the
@@ -28,7 +29,7 @@ results is rerun fresh, and stops reusing them if it then passes. --all and
 
 A harness listed in parity_hosts.json's "known_flaky" (each with its reason)
 that fails runs once more from scratch instead, and a pass then counts. Every
-retry is printed as a RETRIED line in the summary and in the CI job's summary.
+retry is printed as a RETRIED line; the daily keeps retry reasons in its private runner log.
 Fix the cause, then take the harness off the list: nothing else gets this retry.
 
 Harness probes build into .local/parity-target with release optimisations but
@@ -1589,7 +1590,7 @@ SOLO_CPUS = 4
 
 def named_only(config):
     """Harnesses tools/parity_hosts.json keeps out of every automatic selection (--changed, --failed, the default,
-    --flake-check): they run only when named or with --all, the nightly audit. {name: reason}"""
+    --flake-check): they run only when named or with --all without --skip-named-only. {name: reason}"""
     return dict(config.get("named_only", {}))
 
 
@@ -1626,11 +1627,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="harness names, e.g. food or block_update")
     parser.add_argument("--all", action="store_true", help="run every harness from scratch, ignoring earlier passes")
+    parser.add_argument("--skip-named-only", action="store_true", help="omit named-only harnesses from --all (the daily set)")
     parser.add_argument("--exclude", action="append", default=[], help="exclude a harness and its shards")
     parser.add_argument("--fresh", action="store_true", help="run the vanilla oracles even if their inputs are unchanged")
     parser.add_argument("--failed", action="store_true", help="rerun the harnesses that failed last time")
     parser.add_argument("--list", action="store_true", help="print what would run, then stop")
     parser.add_argument("--status", action="store_true", help="print each harness's last result")
+    parser.add_argument("--selection-file", type=Path, help="write selected harness and shard names as JSON before running")
     parser.add_argument("-j", "--jobs", type=int,
                         help="harnesses at once on this machine (default: PARITY_LOCAL_JOBS, else 3 with other hosts or a "
                              "third of its threads, within $FLEET_LOAD_JOBS); runners here share PARITY_MACHINE_JOBS slots")
@@ -1705,9 +1708,9 @@ def main():
     for name in [name for name in chosen if base_name(name) in skips and not args.names]:
         print(f"skipped on {HOST} ({sys.platform}): {name}: {skips[base_name(name)]}", flush=True)
         chosen.remove(name)
-    manual = {} if args.names or args.all else named_only(host_config())
+    manual = {} if args.names or (args.all and not args.skip_named_only) else named_only(host_config())
     for name in [name for name in chosen if base_name(name) in manual]:
-        print(f"not selected (runs when named, and nightly): {name}: {manual[base_name(name)]}", flush=True)
+        print(f"not selected (named-only): {name}: {manual[base_name(name)]}", flush=True)
         chosen.remove(name)
     rounds = {name: args.repeat for name in chosen} if args.repeat > 1 else {}
     if args.flake_check:
@@ -1722,6 +1725,8 @@ def main():
         if rounds:
             print(f"Flake check: {', '.join(sorted(rounds))} must pass {args.flake_rounds} times.", flush=True)
     selected = {name: found[name] for name in chosen}
+    if args.selection_file:
+        args.selection_file.write_text(json.dumps(list(selected)) + "\n", encoding="utf-8")
     if args.list or not selected:
         for name in selected:
             print(name)

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Ìwò",
   "sunrise.studio.topbar.view_short": "Ìwò",
   "sunrise.studio.unknown_server": "Kò mọ̀",
-  "sunrise.tempban.dedicated_required": "Ìdánà fún àkókò díẹ̀ nílò olùpín àràọ̀tọ̀",
-  "sunrise.tempban.invalid_duration": "%s kì í ṣe àkókò: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Àwọn %s ni a ti dánà fún àkókò díẹ̀:",
-  "sunrise.tempban.list.empty": "Kò sí ìdánà fún àkókò díẹ̀",
-  "sunrise.tempban.list.entry": "%1$s ni %2$s fi dánà %3$s (títí di %4$s)",
-  "sunrise.tempban.success": "%1$s fún %2$s, títí di %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ko ni nkan ṣe pẹlu Mojang tabi Microsoft"
 }

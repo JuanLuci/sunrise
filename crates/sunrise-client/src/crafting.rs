@@ -2071,7 +2071,7 @@ impl Recipes {
             return false;
         };
         if let Recipe::Mod(recipe) = recipe {
-            return recipe.assemble(grid, size).is_some();
+            return recipe.assemble(context, grid, size).is_some();
         }
         let Some(input) = Input::of(grid, size) else {
             return false;
@@ -3466,10 +3466,16 @@ mod crafting_remainder_tests {
             None,
         ];
         let calls = std::cell::Cell::new(0);
-        let remainder = recipes.remainders("copy", &grid, 2, &|_| {
-            calls.set(calls.get() + 1);
-            None
-        });
+        let remainder = recipes.remainders(
+            crate::test_resources::server_loop_context(),
+            "copy",
+            &grid,
+            2,
+            &|_| {
+                calls.set(calls.get() + 1);
+                None
+            },
+        );
         assert_eq!(
             calls.get(),
             1,

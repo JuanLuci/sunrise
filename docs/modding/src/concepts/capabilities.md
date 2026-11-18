@@ -55,6 +55,11 @@ The same registrar owns default storage declarations: `block_container(&block, M
 `block_fluids(&block, ModFluidTanks)`, `block_energy(&block, ModEnergyBuffer)` and
 `item_container(&item, provider)`. Their declarations supply both the game's runtime handlers and
 registration-time coverage; the item provider's dynamic slot callback is never invoked by a coverage query.
+`ModContainer::insert_rules` gives slots one shared admission rule for every insertion path: an
+empty-only slot uses `ModContainerInsertRule::OnlyWhenEmpty`, while a same-kind slot uses
+`ModContainerInsertRule::SameKind` and accepts an empty slot or a stack with the same item and
+components. Missing entries are unrestricted. Hoppers, droppers, funnels, menu shift-clicks and
+`ResourceHandler::insert` all ask this rule with the slot, offered stack and current contents.
 The three block-storage declarations accept mod blocks only, not `minecraft` blocks; use
 `block_capability` to expose storage on a vanilla block. The first enabled declaration for a block
 type supplies its default storage. Item-container declarations may target vanilla items too, and

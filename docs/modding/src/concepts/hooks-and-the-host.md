@@ -143,6 +143,17 @@ hooks can run on any loading thread; item default changes must be identical on e
 `Hooks` contains global hooks. Scoped hooks belong to `BlockPart`, `BlockEntityPart`,
 `ItemPart`, `MenuPart` or `FluidPart` and run for the registered object.
 
+## Item tooltip context
+
+The item's `tooltip` hook (`Item.appendHoverText`) receives `event.context`, a
+borrowed `TooltipAppendContext`. Component `TooltipAppender::append` callbacks
+receive the same context: local player identity, `advanced` (F3+H), `creative`
+(creative-tab slot), `nested` (a loaded crossbow projectile), and `tick_rate`.
+The rate follows vanilla 26.3's `Item.TooltipContext.tickRate()`: the current
+client level's tick-rate manager, or 20 when no level is present. It is not
+measured TPS or the frame rate. The item hook still does not fire for nested
+projectiles or hidden tooltips; adding context does not change line ordering.
+
 ## Level hosts
 
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
@@ -168,6 +179,8 @@ load or reload, and `ClientPacketReceived { integrated_server }` for a client's 
 integrated client, whose server already updated the shared static data. Installing client tags
 announces the bound defaults; it does not rebind those defaults.
 
+`block_face_sturdy(pos, face, support)` reads `BlockState.isFaceSturdy` through the same engine query as the level handle, including dynamic and published shapes. `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`, except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`. `can_see_sky(pos)` tests full stored sky light through the level handle's query. Both return `None` on clients, for unloaded or out-of-height positions, or in a callback without the corresponding view. Neither loads chunks or opens loot containers. They are owning-game-thread reads, not available in worker-thread hook bodies.
+
 `block_entity(pos)` reads this level's block entity without loading a chunk; it returns `None` when absent, unloaded or out for its tick. On a client it returns only the local block entity handle. `container_size(at)` and `container_stack(at, slot)` are the same side-local capability snapshots as `ItemsHost` supplies; neither generates unopened loot, and both refuse clients and unloaded positions. `BlockEntityPartState::state_in(level, entity)` and `state_existing_in` read the same attachment snapshots as their `Host` equivalents, without inserting a default, generating loot or loading chunks. Unloaded or stale holders fail; clients have no server Part state. All are owning-game-thread reads, never available in worker hook bodies.
 
 `LevelRandomHost::container_signal(pos)` is the engine comparator container read. Unlike the immutable slot snapshot, it generates unopened loot once, as vanilla's `getItem` does, then calculates 0 to 15 using each stack's maximum size. It returns `None` on clients and unloaded positions, never loads a chunk, and runs only on the owning game thread. `analog_output` version 2 receives this mutable host so the loot generation and random draws happen in vanilla order; it permits no other world edit.
@@ -184,6 +197,17 @@ the levels other callbacks get (a damage hit's, a part's read view) may return `
 and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
+
+A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
+beside that state. It runs on both sides at placement and shape updates, with a read-only `LevelSide`:
+`Some(true)` counts as a wall, `Some(false)` does not, and `None` keeps the `minecraft:walls` tag
+check. It changes only the gate's `in_wall`, not wall connections or pathfinding.
+
+`BlockPart::is_possible_to_respawn_in` answers the forced respawn column's space check on the
+server, with a read-only host. If no bed or anchor rule handles the spawn, the server asks for
+both the saved point and the block above. This includes a bed or anchor at which spawn cannot be
+set. `Some(true)` accepts that state, `Some(false)` rejects it, and `None` keeps vanilla's predicate.
+It does not select a bed or anchor's stand-up position; `respawn_position` handles those.
 
 `LevelHost` has no random access: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so

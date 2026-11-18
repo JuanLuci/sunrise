@@ -148,9 +148,7 @@ impl Wire for Ident {
 /// A name that crosses as a string.
 pub struct Name(String);
 impl Wire for Name {
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        String::layout(visiting)
-    }
+    layout_via!(String);
 }
 /// Context that crosses by a hand-written impl alone.
 pub struct Context;
@@ -258,6 +256,13 @@ pub fn sunrise_mod(_: TokenStream, input: TokenStream) -> TokenStream { input }
 "#,
     ),
     (
+        "crates/sunrise-mod-package/src/fixture.extension-tags.json",
+        r#"[
+    {"registry": "item", "id": "sunrise:fixture", "doc": "Fixture items."},
+    {"registry": "block", "id": "sunrise:fixture", "doc": "Fixture blocks."}
+]"#,
+    ),
+    (
         "crates/sunrise-mod-package/src/manifest.rs",
         r#"
 #[serde(rename_all = "kebab-case")]
@@ -333,7 +338,7 @@ fn export_fixture(edits: &[(&str, &str, &str)], hooks: &str) -> Export {
         std::fs::write(path, text).unwrap();
     }
     let catalog = Catalog::parse(&[("hooks/ping.rs".into(), hooks.into())]).unwrap();
-    let mut index = Index::new(root, &[]);
+    let mut index = crate::index::game(root, &[]);
     build(root, &mut index, &catalog.hooks, &boundary()).unwrap()
 }
 
@@ -901,7 +906,7 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
             (
                 LIB,
                 "/// A name that crosses as a string.",
-                "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        String::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+                "impl Wire for Text {\n    layout_via!(String);\n}\n/// A name that crosses as a string.",
             ),
         ],
         HOOKS,
@@ -911,6 +916,49 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
     assert_eq!(via.hash, before.hash);
     assert!(before.shape.is_some() && via.shape.is_some());
     assert_ne!(via.shape, before.shape);
+}
+
+/// A tree from before `layout_via!` declared a forwarding impl by a method returning the other
+/// type's layout: it reads as the same `via:` form, and exports without call names, so a
+/// comparison across the change never skips the old side.
+#[test]
+fn a_baseline_forwarding_its_layout_reads_as_the_declared_via_form() {
+    let text = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Text")
+            .cloned()
+            .unwrap()
+    };
+    let old = [
+        (
+            LIB,
+            "#[derive(Clone, Debug, Wire)]\npub struct Text",
+            "#[derive(Clone, Debug)]\npub struct Text",
+        ),
+        (
+            LIB,
+            "/// A name that crosses as a string.",
+            "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        <String as Wire>::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+        ),
+    ];
+    let forwarded = text(&export_fixture(&old, HOOKS));
+    assert_eq!(forwarded.contract.wire_form.as_deref(), Some("via:String"));
+    let declared = text(&export_fixture(
+        &[
+            old[0],
+            (
+                LIB,
+                "/// A name that crosses as a string.",
+                "impl Wire for Text {\n    layout_via!(String);\n}\n/// A name that crosses as a string.",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(forwarded.hash, declared.hash);
+    assert_eq!(forwarded.shape, declared.shape);
 }
 
 #[test]
@@ -950,7 +998,7 @@ fn a_listed_boundary_trait_an_older_tree_lacks_is_a_note() {
         std::fs::write(path, text).unwrap();
     }
     let catalog = Catalog::parse(&[("hooks/ping.rs".into(), HOOKS.into())]).unwrap();
-    let mut index = Index::new(root, &[]);
+    let mut index = crate::index::game(root, &[]);
     let mut listed = boundary();
     listed.roles.push(("FluidsHost".into(), Role::Call));
     let export = build(root, &mut index, &catalog.hooks, &listed).unwrap();
@@ -978,4 +1026,124 @@ fn a_hidden_type_named_only_by_an_impl_gets_its_record() {
         secret(&[(LIB, "/// A colour.", from)]).as_deref(),
         Some("type:internal::Secret")
     );
+}
+
+/// `surface.json` lists, for each hook and trait method that crosses, the name a built wasm mod
+/// uses for it, and no two records share one.
+#[test]
+#[ignore = "daily"]
+fn every_crossing_method_lists_one_distinct_call_name() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let export = export(&root).unwrap();
+    let mut owners: std::collections::BTreeMap<&String, Vec<&str>> = Default::default();
+    for item in &export.surface.traits {
+        for method in &item.methods {
+            if let Some(call) = &method.call {
+                owners.entry(call).or_default().push(&method.id);
+            }
+        }
+    }
+    assert!(owners.len() > 1000, "{} calls", owners.len());
+    owners.retain(|_, ids| ids.len() > 1);
+    assert!(owners.is_empty(), "records sharing a call name: {owners:?}");
+}
+
+/// `placement_sync::PROTOCOL` stands for the shapes the placement frames carry, which nothing
+/// else reads: `Frame` and the catalogue body's `RecipeBookCategory`. When this fails, the
+/// frames changed: bump `PROTOCOL` there, then update the pinned hash here.
+#[test]
+#[ignore = "daily"]
+fn the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries() {
+    const PINNED: &str = "7ac8342cd861d9a76ab542d43ded039f";
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+    let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
+    let included = [
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+        ("mod_api_host_areas.rs", generated.areas.as_str()),
+        ("capability_providers_generated.rs", providers.as_str()),
+    ];
+    let mut index = crate::index::game(&root, &included);
+    index.add_crate("sunrise_client", "crates/sunrise-client/src");
+    let (forms, ids) = (HashMap::new(), HashMap::new());
+    let mut layouts = mod_source::layouts::Layouts::new(rust::GameWires {
+        forms: &forms,
+        ids: &ids,
+    });
+    layouts.fields_without_form = true;
+    let mut keys = Vec::new();
+    for (krate, module, name) in [
+        (
+            "sunrise_client",
+            vec!["recipe_book".to_owned(), "placement_sync".to_owned()],
+            "Frame",
+        ),
+        ("mod_api", Vec::new(), "RecipeBookCategory"),
+    ] {
+        let module = index.module(krate, &module).unwrap();
+        let Ok(Found::Item(id)) = index.resolve_path(module, &[name.to_owned()]) else {
+            panic!("{krate}: no type {name}");
+        };
+        keys.push(layouts.key(&index, id));
+    }
+    layouts.finish(&mut index);
+    let mut shapes = Shapes::new(&layouts.table);
+    let text: Vec<String> = keys.iter().map(|key| shapes.shape(key).unwrap()).collect();
+    let hash = mod_surface::shape::digest(&text.join(","));
+    assert_eq!(
+        hash, PINNED,
+        "the placement frames' shapes changed (now {hash}): bump placement_sync PROTOCOL"
+    );
+}
+
+/// The names `surface.json` lists as `call` are the names the game's table serves and exports,
+/// both written by the one generator from one source tree: offline, two builds' exports say
+/// whether a built mod loads.
+#[test]
+#[ignore = "daily"]
+fn the_surface_export_names_the_calls_the_games_table_holds() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let host = std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn({
+            let root = root.clone();
+            move || crate::generate_wire_host(&root)
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+        .unwrap();
+    let export = export(&root).unwrap();
+    let calls: Vec<&String> = export
+        .surface
+        .hooks
+        .iter()
+        .filter_map(|hook| hook.call.as_ref())
+        .chain(
+            export
+                .surface
+                .traits
+                .iter()
+                .flat_map(|item| &item.methods)
+                .filter_map(|method| method.call.as_ref()),
+        )
+        .collect();
+    assert!(calls.len() > 1000, "{} calls", calls.len());
+    for call in &calls {
+        assert!(
+            host.contains(&format!("\"{call}\"")),
+            "{call} is not in the game's table"
+        );
+    }
+    let mut owners: std::collections::BTreeMap<&String, Vec<&str>> = Default::default();
+    for item in &export.surface.traits {
+        for method in &item.methods {
+            if let Some(call) = &method.call {
+                owners.entry(call).or_default().push(&method.id);
+            }
+        }
+    }
+    owners.retain(|_, ids| ids.len() > 1);
+    assert!(owners.is_empty(), "records sharing a call name: {owners:?}");
 }

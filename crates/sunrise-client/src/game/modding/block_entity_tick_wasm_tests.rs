@@ -45,19 +45,17 @@ pub(super) fn tick(
       (@custom "dylink.0" "\01\04\00\00\00\00")
       (import "env" "memory" (memory 1))
       (import "env" "__indirect_function_table" (table 1 funcref))
-      (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-      (import "sunrise" "host_reply" (func (param i32)))
-      (func (export "sunrise_layout") (result i64) i64.const {layout})
+      {imports}
       (global $length (mut i32) (i32.const 0))
       (data (i32.const 4096) "{set}")
       (data (i32.const 8192) "{remove}")
       (data (i32.const 32768) "{revision}")
       (func (export "sunrise_in") (param i32) (result i32) local.get 0 global.set $length i32.const 512)
-      (func (export "sunrise_hook") (param i32) (result i64)
+      (func (export "sunrise_hook") (param i64) (result i64)
         i32.const {setter} i32.const 4096 i32.const {set_len} i32.const 16384 i32.const 4096 call $host drop
         i32.const {discard} i32.const 8192 i32.const {remove_len} i32.const 16384 i32.const 4096 call $host drop
         {output})
-    )"#, layout=*mod_api::wire::LAYOUT, revision=escape(wrong_revision.bytes()), set=escape(set.bytes()), remove=escape(remove.bytes()), set_len=set.bytes().len(), remove_len=remove.bytes().len())).unwrap();
+    )"#, imports=sunrise_mod_wasm::fixture::wat_imports(), revision=escape(wrong_revision.bytes()), set=escape(set.bytes()), remove=escape(remove.bytes()), set_len=set.bytes().len(), remove_len=remove.bytes().len())).unwrap();
     let module = sunrise_mod_wasm::fixture::module(&bytes).unwrap();
     let handler = sunrise_mod_wasm::WasmHandler::new(&module, Id(1));
     handler.block_entity_tick(host, event);

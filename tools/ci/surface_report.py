@@ -84,9 +84,11 @@ def last_line(text: str) -> str:
 
 def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tuple[int, str]:
     """Exports both trees at once, diffs them; (exit code, report text)."""
-    exports = {name: subprocess.Popen([tool, "surface", str(tree), str(work / f"{name}.json")],
+    # The base's records may predate the call names: its export names none (`--without-calls`),
+    # which no comparison reads.
+    exports = {name: subprocess.Popen([tool, "surface", str(tree), str(work / f"{name}.json"), *flags],
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-               for name, tree in (("base", base), ("head", head))}
+               for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
     results = {name: process.communicate() for name, process in exports.items()}
     # This tree failing is a broken generator, which no other step would catch; the base failing
     # is an older tree this tool cannot read, which is no fault of the pull request.

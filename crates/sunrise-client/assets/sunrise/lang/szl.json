@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Widok",
   "sunrise.studio.topbar.view_short": "Widok",
   "sunrise.studio.unknown_server": "Niyznany",
-  "sunrise.tempban.dedicated_required": "Czasowe bany potrzebujōm dedykowanego serwera",
-  "sunrise.tempban.invalid_duration": "%s niy je czasym: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Je %s czasowych banōw:",
-  "sunrise.tempban.list.empty": "Niy ma czasowych banōw",
-  "sunrise.tempban.list.entry": "%1$s bōł zabaniōny ôd %2$s %3$s (do %4$s)",
-  "sunrise.tempban.success": "Zabaniōno %1$s na %2$s, do %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Niy powiōnzany ze Mojang abo Microsoft"
 }

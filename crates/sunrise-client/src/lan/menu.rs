@@ -8,7 +8,7 @@ mod backing;
 use super::guest::Guest;
 use crate::{
     bundle::{Contents, toggle_selected},
-    containers::BlockEntity,
+    containers::{BlockEntity, ModContainerInsertRule},
     enchant::Enchantments,
     items::{ItemStack, Items},
     mobs::equip::equippable_in_slot,
@@ -46,6 +46,16 @@ pub trait Rules {
     /// before the click (none: no listener, so the plain click).
     fn stacked(&self) -> Option<&crate::menu::StackedOutcome> {
         None
+    }
+    /// The default mod-container admission rule for a slot. The server supplies the
+    /// declaration's rule; standalone menu tests and non-mod menus keep the unrestricted default.
+    fn mod_container_insert_rule(
+        &self,
+        _slot: usize,
+        _current: Option<&ItemStack>,
+        _offered: &ItemStack,
+    ) -> bool {
+        true
     }
 }
 
@@ -152,6 +162,11 @@ impl Menu {
         Some((l.slots(), &self.links))
     }
 
+    /// The menu slots replaced by linked containers, which do not use the block's own rules.
+    pub(crate) fn linked_slot_range(&self) -> Option<std::ops::Range<usize>> {
+        self.linked().map(|(range, _)| range)
+    }
+
     /// The linked slots (`links`) no container stands behind, which hold
     /// nothing and take nothing: they are left out of clicks as a hidden
     /// slot is.
@@ -238,6 +253,24 @@ impl Slots {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// The declared insert rules for a mod block's own menu slots. Other menu backings have no
+    /// mod-container declaration here; their own handler remains authoritative.
+    pub fn container_insert_rules(self, world: &World, size: usize) -> Vec<ModContainerInsertRule> {
+        let Self::Block(pos) = self else {
+            return Vec::new();
+        };
+        if !matches!(world.block_entities.get(&pos), Some(BlockEntity::Mod(_))) {
+            return Vec::new();
+        }
+        let Some(container) = world
+            .block_entities
+            .mod_container(world.block(pos.0, pos.1, pos.2).0)
+        else {
+            return Vec::new();
+        };
+        container.insert_rules[..container.insert_rules.len().min(size)].to_vec()
     }
 
     /// Locate a container slot, including the correct half of a double chest.
@@ -613,7 +646,8 @@ impl View<'_> {
             && !crate::menu::fits_inside_container_items(self.loop_context, stack))
     }
     fn slot_rules(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> (bool, u32) {
-        let own = self.vanilla_may_place(i, stack, rules);
+        let admission = rules.mod_container_insert_rule(i, self.get(i).as_ref(), stack);
+        let own = self.vanilla_may_place(i, stack, rules) && admission;
         let max = if self.container.is_none() && (5..=8).contains(&i) {
             1
         } else {
@@ -638,7 +672,8 @@ impl View<'_> {
             (own, true, max),
             item_max,
         );
-        (place, max)
+        // A scoped rule may not admit what the declaration's admission rule refuses.
+        (place && admission, max)
     }
     fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         self.enabled(i) && self.slot_rules(i, stack, rules).0
@@ -812,6 +847,9 @@ fn move_to(
         if let Some(mut existing) = view.get(i)
             && existing.same_item_same_components(&stack)
         {
+            if !rules.mod_container_insert_rule(i, Some(&existing), &stack) {
+                continue;
+            }
             if let Some(menu) = view
                 .guest
                 .menu
@@ -1523,6 +1561,103 @@ pub(crate) mod tests {
         }
         fn max_stack(&self, item: &str) -> u32 {
             self.0.get(item).map_or(64, |i| i.max_stack)
+        }
+    }
+
+    struct SameKindRules(Items);
+    impl Rules for SameKindRules {
+        fn items(&self) -> &Items {
+            &self.0
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
+        }
+        fn max_stack(&self, item: &str) -> u32 {
+            self.0.get(item).map_or(64, |i| i.max_stack)
+        }
+        fn mod_container_insert_rule(
+            &self,
+            slot: usize,
+            current: Option<&ItemStack>,
+            offered: &ItemStack,
+        ) -> bool {
+            slot != 0
+                || crate::containers::mod_container_insert_allowed(
+                    ModContainerInsertRule::SameKind,
+                    current,
+                    offered,
+                )
+        }
+    }
+
+    struct OnlyWhenEmptyRules(Items);
+    impl Rules for OnlyWhenEmptyRules {
+        fn items(&self) -> &Items {
+            &self.0
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
+        }
+        fn max_stack(&self, item: &str) -> u32 {
+            self.0.get(item).map_or(64, |i| i.max_stack)
+        }
+        fn mod_container_insert_rule(
+            &self,
+            slot: usize,
+            current: Option<&ItemStack>,
+            offered: &ItemStack,
+        ) -> bool {
+            slot != 0
+                || crate::containers::mod_container_insert_allowed(
+                    ModContainerInsertRule::OnlyWhenEmpty,
+                    current,
+                    offered,
+                )
+        }
+    }
+
+    /// A part's scoped slot rule that admits everything into the `test:chest` menu.
+    struct AdmitAll;
+    impl crate::menu::SlotRules for AdmitAll {
+        fn listens(&self, menu: &str) -> bool {
+            menu == "test:chest"
+        }
+        fn rule(
+            &self,
+            _: &str,
+            _: usize,
+            _: &ItemStack,
+            _: crate::menu::SlotContext<'_>,
+            may_place: &mut bool,
+            _: &mut bool,
+            _: &mut u32,
+        ) {
+            *may_place = true;
+        }
+    }
+
+    /// The same rules, with the scoped rule that answers yes lent to the click.
+    struct OnlyWhenEmptyAdmitAllRules(OnlyWhenEmptyRules);
+    impl Rules for OnlyWhenEmptyAdmitAllRules {
+        fn items(&self) -> &Items {
+            self.0.items()
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
+        }
+        fn max_stack(&self, item: &str) -> u32 {
+            self.0.max_stack(item)
+        }
+        fn slot_rules(&self) -> Option<&dyn crate::menu::SlotRules> {
+            Some(&AdmitAll)
+        }
+        fn mod_container_insert_rule(
+            &self,
+            slot: usize,
+            current: Option<&ItemStack>,
+            offered: &ItemStack,
+        ) -> bool {
+            self.0.mod_container_insert_rule(slot, current, offered)
         }
     }
 
@@ -3112,5 +3247,106 @@ pub(crate) mod tests {
         let (drops, _) = click(&mut view, &mut drag, 9, 2, input::THROW, &rules);
         assert_eq!(drops.iter().fold(0, |n, s| n + s.count), 4);
         assert!(view.get(9).is_none());
+    }
+
+    #[test]
+    fn a_same_kind_container_slot_refuses_a_different_item_on_shift_click() {
+        let rules = SameKindRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        g.inventory[9] = Some(ItemStack::new("minecraft:dirt", 1));
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 1))];
+        let context = crate::test_resources::loop_context(
+            sunrise_world::native_load_context::LoopSide::Server,
+        );
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            container_limits: Vec::new(),
+            hidden: &[],
+            slot_snapshot: Default::default(),
+            loop_context: &context,
+        };
+        let mut drag = None;
+        click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0), Some(ItemStack::new("minecraft:stone", 1)));
+        assert_eq!(view.get(1), Some(ItemStack::new("minecraft:dirt", 1)));
+    }
+
+    #[test]
+    fn an_only_when_empty_container_slot_refuses_the_same_item_on_shift_click() {
+        let rules = OnlyWhenEmptyRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        g.inventory[9] = Some(ItemStack::new("minecraft:stone", 1));
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 1))];
+        let context = crate::test_resources::loop_context(
+            sunrise_world::native_load_context::LoopSide::Server,
+        );
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            container_limits: Vec::new(),
+            hidden: &[],
+            slot_snapshot: Default::default(),
+            loop_context: &context,
+        };
+        let mut drag = None;
+        click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0), Some(ItemStack::new("minecraft:stone", 1)));
+        assert_eq!(view.get(1), Some(ItemStack::new("minecraft:stone", 1)));
+    }
+
+    #[test]
+    fn a_scoped_rule_cannot_admit_into_an_occupied_only_when_empty_slot() {
+        let rules =
+            OnlyWhenEmptyAdmitAllRules(OnlyWhenEmptyRules(Items::for_tests(Default::default())));
+        let mut g = guest();
+        g.menu = Some(Menu {
+            window: 1,
+            kind: 0,
+            pos: Some((0, 0, 0)),
+            slots: Slots::Block((0, 0, 0)),
+            size: 1,
+            state: 0,
+            sent: Vec::new(),
+            drag: None,
+            sent_data: Vec::new(),
+            hidden: Vec::new(),
+            mod_type: None,
+            registry_id: "test:chest".into(),
+            craft: None,
+            links: Vec::new(),
+            asks_still_valid: false,
+        });
+        g.inventory[9] = Some(ItemStack::new("minecraft:stone", 1));
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 1))];
+        let context = crate::test_resources::loop_context(
+            sunrise_world::native_load_context::LoopSide::Server,
+        );
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            container_limits: Vec::new(),
+            hidden: &[],
+            slot_snapshot: Default::default(),
+            loop_context: &context,
+        };
+        let mut drag = None;
+        // A quick move leaves the occupied slot alone.
+        click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0), Some(ItemStack::new("minecraft:stone", 1)));
+        assert_eq!(view.get(1), Some(ItemStack::new("minecraft:stone", 1)));
+        // A pickup click with the same item on the cursor can't merge into the slot either: as
+        // `AbstractContainerMenu.doClick` does when `mayPlace` refuses a same-item stack, it
+        // takes the slot's stack onto the cursor instead.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 1));
+        click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(0), None);
+        assert_eq!(
+            view.guest.carried,
+            Some(ItemStack::new("minecraft:stone", 2))
+        );
     }
 }

@@ -1,4 +1,7 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
+#[cfg(test)]
+#[path = "menu_registry_tests.rs"]
+mod menu_registry_tests;
 use crate::{
     BlockEntityTypeKey, BlockKey, DimensionKey, EffectKey, EnchantmentKey, EntityTypeKey, FluidKey,
     ItemKey, MenuKey,
@@ -156,9 +159,12 @@ pub(crate) fn resolved_entity_types()
         std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_entity_types)
 }
-pub(crate) static MENUS: std::sync::LazyLock<
-    std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,
-> = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+pub(crate) fn resolved_menus()
+-> &'static std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>> {
+    static EMPTY: std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>> =
+        std::sync::RwLock::new(None);
+    crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_menus)
+}
 pub(crate) static ENCHANTMENTS: std::sync::LazyLock<
     std::sync::RwLock<Option<sunrise_mod_runtime::registry_keys::Names>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
@@ -229,7 +235,7 @@ pub fn resolve_entity_types<'a>(ids: impl IntoIterator<Item = &'a str>) -> Resul
 
 /// Complete the built-in menu registry in `ids`' registration order.
 pub fn resolve_menus<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
-    resolve_ordered(&MENUS, ids, "menu")
+    resolve_ordered(resolved_menus(), ids, "menu")
 }
 
 /// Complete the data-loaded enchantment registry in `ids`' registry order.
@@ -289,7 +295,7 @@ pub fn entity_type_keys() -> Vec<EntityTypeKey> {
 
 /// Every built-in menu key in registry order.
 pub fn menu_keys() -> Vec<MenuKey> {
-    ordered_keys(&MENUS, MenuKey)
+    ordered_keys(resolved_menus(), MenuKey)
 }
 
 /// Every loaded enchantment key in registry order.
@@ -316,7 +322,7 @@ impl MenuKey {
     /// Validate an incoming slot against the built-in registry, not a world's mapping.
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        ordered_slot_is_live(&MENUS, slot)
+        ordered_slot_is_live(resolved_menus(), slot)
             .then_some(Self(slot))
             .ok_or("unknown MenuKey slot")
     }
@@ -340,7 +346,7 @@ pub fn entity_type_key_id(key: EntityTypeKey) -> Option<String> {
 
 /// The canonical name of a built-in menu key, for diagnostics.
 pub fn menu_key_id(key: MenuKey) -> Option<String> {
-    ordered_id(&MENUS, key.0)
+    ordered_id(resolved_menus(), key.0)
 }
 
 /// The canonical name of a loaded enchantment key, for diagnostics.

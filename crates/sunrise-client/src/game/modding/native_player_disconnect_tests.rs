@@ -225,20 +225,18 @@ fn wasm_disconnect_crosses_the_generated_forwarder() {
               (@custom "dylink.0" "\01\04\00\00\00\00")
               (import "env" "memory" (memory 1))
               (import "env" "__indirect_function_table" (table 1 funcref))
-              (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-              (import "sunrise" "host_reply" (func (param i32)))
-              (func (export "sunrise_layout") (result i64) i64.const {layout})
+              {imports}
               (data (i32.const 4096) "{kick}")
               (data (i32.const 8192) "{refused}")
               (data (i32.const 16384) "{reply}")
               (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-              (func (export "sunrise_hook") (param i32) (result i64)
+              (func (export "sunrise_hook") (param i64) (result i64)
                 i32.const {id} i32.const 4096 i32.const {kick_len} i32.const 32768 i32.const 4096 call $host drop
                 {kicked}
                 i32.const {id} i32.const 8192 i32.const {refused_len} i32.const 36864 i32.const 4096 call $host drop
                 {not_kicked}
                 i64.const {reply_at}))"#,
-                layout = *mod_api::wire::LAYOUT,
+                imports = sunrise_mod_wasm::fixture::wat_imports(),
                 kick = escape(kick.bytes()),
                 refused = escape(refused.bytes()),
                 reply = escape(reply.bytes()),

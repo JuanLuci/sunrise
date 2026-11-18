@@ -468,6 +468,11 @@ impl Game<'_> {
     /// `Block.isPossibleToRespawnInThis`: neither solid nor liquid; banners,
     /// signs and pressure plates override it to always.
     fn possible_to_respawn_in(&self, state: BlockStateId) -> bool {
+        let mut answer = None;
+        self.native_is_possible_to_respawn_in(state, &mut answer);
+        if let Some(answer) = answer {
+            return answer;
+        }
         let f = self.res.facts().get(state);
         let name = &*f.name;
         let liquid = self.res.behaviours().facts(state).flags & state_flags::LIQUID != 0;
@@ -546,8 +551,8 @@ impl Game<'_> {
     }
     /// `ServerPlayer.findRespawnAndUseSpawnBlock` for a config in the loaded
     /// dimension: position and angles, using an anchor's charge; a bed's
-    /// stand-up spot. A forced point (`spawnpoint`) that is no anchor or bed
-    /// holds if a player fits in it; anything else is gone.
+    /// stand-up spot. A forced point (`spawnpoint`) not handled by the anchor
+    /// or bed rule holds if the spawn column is clear.
     pub(super) fn find_respawn_and_use(
         &mut self,
         c: RespawnConfig,
@@ -566,10 +571,13 @@ impl Game<'_> {
                 return Ok(self.part_respawn_position(state, c, found));
             }
             let [x, y, z] = c.pos;
-            let free = c.forced
-                && !self.is_anchor(state)
-                && self.possible_to_respawn_in(state)
-                && self.possible_to_respawn_in(self.world.block(x, y + 1, z));
+            let free = if c.forced {
+                let bottom = self.possible_to_respawn_in(state);
+                let top = self.possible_to_respawn_in(self.world.block(x, y + 1, z));
+                bottom && top
+            } else {
+                false
+            };
             let at = Vec3::new(f64::from(x) + 0.5, f64::from(y) + 0.1, f64::from(z) + 0.5);
             return Ok(self.part_respawn_position(state, c, free.then_some((at, c.yaw, c.pitch))));
         }
@@ -891,6 +899,83 @@ mod connected_spawnpoint_rotation_tests {
         drop(host);
         drop(game);
         std::fs::remove_dir_all(scratch).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod forced_respawn_space_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "daily"]
+    fn forced_respawn_checks_parts_for_both_cells() {
+        use mod_api::{BlockPart, Hooks, Host, IsPossibleToRespawnInEvent, Registrar};
+        struct Space(bool);
+        #[mod_api::sunrise_part]
+        impl BlockPart for Space {
+            fn is_possible_to_respawn_in(
+                &self,
+                _: &dyn Host,
+                _: &mut IsPossibleToRespawnInEvent,
+            ) -> Option<bool> {
+                Some(self.0)
+            }
+        }
+        struct Parts;
+        #[mod_api::__subscriptions]
+        impl Hooks for Parts {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                let stone = r.block_key("minecraft:stone");
+                r.block_part(stone, Space(true));
+                let anchor = r.block_key("minecraft:respawn_anchor");
+                r.block_part(anchor, Space(true));
+                let air = r.block_key("minecraft:air");
+                r.block_part(air, Space(false));
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("space", Box::new(Parts))].into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let anchor = registry.default_state("minecraft:respawn_anchor").unwrap();
+                let air = registry.default_state("minecraft:air").unwrap();
+                let glass = registry.default_state("minecraft:glass").unwrap();
+                // Parts can accept solid space and reject normally empty space.
+                assert!(game.possible_to_respawn_in(stone));
+                assert!(!game.possible_to_respawn_in(air));
+                assert!(!game.possible_to_respawn_in(glass));
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.world.set(5, 64, 5, stone).unwrap();
+                game.world.set(5, 65, 5, stone).unwrap();
+                let config = RespawnConfig {
+                    dim: Dim::Overworld,
+                    pos: [5, 64, 5],
+                    yaw: 45.0,
+                    pitch: 10.0,
+                    forced: true,
+                };
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_some());
+                game.world.set(5, 65, 5, air).unwrap();
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_none());
+                game.world.set(5, 65, 5, stone).unwrap();
+                game.world.set(5, 64, 5, air).unwrap();
+                assert!(game.find_respawn_and_use(config, false).unwrap().is_none());
+
+                // The Overworld anchor cannot set spawn, so its part answers
+                // the ordinary forced-column predicate instead.
+                assert!(!game.anchor_works());
+                game.world.set(5, 64, 5, anchor).unwrap();
+                assert_eq!(
+                    game.find_respawn_and_use(config, false).unwrap(),
+                    Some((Vec3::new(5.5, 64.1, 5.5), 45.0, 10.0)),
+                );
+            });
+        });
     }
 }
 

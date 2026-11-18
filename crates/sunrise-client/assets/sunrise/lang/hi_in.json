@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "दृश्य",
   "sunrise.studio.topbar.view_short": "दृश्य",
   "sunrise.studio.unknown_server": "अज्ञात",
-  "sunrise.tempban.dedicated_required": "अस्थायी बैन के लिए समर्पित सर्वर चाहिए",
-  "sunrise.tempban.invalid_duration": "%s कोई अवधि नहीं है: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s अस्थायी बैन हैं:",
-  "sunrise.tempban.list.empty": "कोई अस्थायी बैन नहीं है",
-  "sunrise.tempban.list.entry": "%1$s को %2$s द्वारा बैन किया गया %3$s (%4$s तक)",
-  "sunrise.tempban.success": "%1$s %2$s के लिए, %3$s तक",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang या Microsoft से संबद्ध नहीं"
 }

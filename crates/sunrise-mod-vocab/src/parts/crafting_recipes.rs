@@ -73,6 +73,19 @@ impl<T: Wire> CraftingRecipeCodec<T> {
     }
 }
 
+// no wire: borrowed per-craft reader; its owning loop and callback retain its authority.
+/// The frozen loop view plus the engine's stack-aware default for each input cell.
+/// Only remaining_items receives this view. Tag reads allocate nothing; a default remainder
+/// is an owned stack and may allocate for component data. Reads perform no file I/O.
+pub trait CraftingRemainders: crate::LoopContext {
+    /// Default remainder for this row-major input cell's original pre-take stack,
+    /// components included.
+    /// Empty or out-of-range cells, and items without a remainder, answer None.
+    /// This is the server's default rule including crafting_remainder Parts; client prediction
+    /// uses its existing data-only default and accepts the server's correction.
+    fn default_remainder(&self, cell: u32) -> Option<crate::ItemStack>;
+}
+
 /// A mod's typed crafting serializer and pure matching callbacks.
 /// Register through Hooks::register with its RegistrationContext. Callback failures refuse
 /// the file or craft; do not panic. Values must have an explicit Wire codec.
@@ -87,20 +100,32 @@ pub trait CraftingRecipeKind: Send + Sync + 'static {
     fn decode(&self, json: &str) -> Result<Self::Value, String>;
     /// Write the decoded value for Sunrise client synchronization.
     fn write(&self, value: &Self::Value) -> Result<String, String>;
-    /// Whether this value matches the owned grid snapshot.
-    fn matches(&self, value: &Self::Value, grid: CraftingGrid) -> bool;
+    /// Whether this value matches the owned grid snapshot. The context reads the
+    /// owning frozen resource generation; unavailable tags should not match.
+    fn matches(
+        &self,
+        context: &dyn crate::LoopContext,
+        value: &Self::Value,
+        grid: CraftingGrid,
+    ) -> bool;
     /// Assemble the result after a successful match. Counts must be 1 through 99;
     /// unknown item keys and larger counts refuse the result.
-    fn assemble(&self, value: &Self::Value, grid: CraftingGrid) -> Option<crate::ItemStack>;
+    fn assemble(
+        &self,
+        context: &dyn crate::LoopContext,
+        value: &Self::Value,
+        grid: CraftingGrid,
+    ) -> Option<crate::ItemStack>;
     /// One remainder per input cell; None uses the default item remainders.
     /// Asked once per server take, with the grid before consumption. Each count must
     /// be 1 through 99. An invalid key, count or vector length uses defaults.
     fn remaining_items(
         &self,
+        context: &dyn CraftingRemainders,
         value: &Self::Value,
         grid: CraftingGrid,
     ) -> Option<Vec<Option<crate::ItemStack>>> {
-        let _ = (value, grid);
+        let _ = (context, value, grid);
         None
     }
 }
@@ -114,13 +139,23 @@ pub trait CraftingRecipeHandler: Send + Sync {
     /// Write one decoded value for sync.
     fn write(&self, value: &CraftingRecipeValue) -> Result<String, String>;
     /// Test this owner's recipe.
-    fn matches(&self, value: &CraftingRecipeValue, grid: CraftingGrid) -> bool;
+    fn matches(
+        &self,
+        context: &dyn crate::LoopContext,
+        value: &CraftingRecipeValue,
+        grid: CraftingGrid,
+    ) -> bool;
     /// Assemble this owner's recipe.
-    fn assemble(&self, value: &CraftingRecipeValue, grid: CraftingGrid)
-    -> Option<crate::ItemStack>;
+    fn assemble(
+        &self,
+        context: &dyn crate::LoopContext,
+        value: &CraftingRecipeValue,
+        grid: CraftingGrid,
+    ) -> Option<crate::ItemStack>;
     /// Return custom remainders or the default policy.
     fn remaining_items(
         &self,
+        context: &dyn CraftingRemainders,
         value: &CraftingRecipeValue,
         grid: CraftingGrid,
     ) -> Option<Vec<Option<crate::ItemStack>>>;
@@ -137,23 +172,31 @@ impl<K: CraftingRecipeKind> CraftingRecipeHandler for TypedKind<K> {
     fn write(&self, value: &CraftingRecipeValue) -> Result<String, String> {
         self.kind.write(&(self.codec.decode)(value)?)
     }
-    fn matches(&self, value: &CraftingRecipeValue, grid: CraftingGrid) -> bool {
-        (self.codec.decode)(value).is_ok_and(|value| self.kind.matches(&value, grid))
+    fn matches(
+        &self,
+        context: &dyn crate::LoopContext,
+        value: &CraftingRecipeValue,
+        grid: CraftingGrid,
+    ) -> bool {
+        (self.codec.decode)(value).is_ok_and(|value| self.kind.matches(context, &value, grid))
     }
     fn assemble(
         &self,
+        context: &dyn crate::LoopContext,
         value: &CraftingRecipeValue,
         grid: CraftingGrid,
     ) -> Option<crate::ItemStack> {
-        self.kind.assemble(&(self.codec.decode)(value).ok()?, grid)
+        self.kind
+            .assemble(context, &(self.codec.decode)(value).ok()?, grid)
     }
     fn remaining_items(
         &self,
+        context: &dyn CraftingRemainders,
         value: &CraftingRecipeValue,
         grid: CraftingGrid,
     ) -> Option<Vec<Option<crate::ItemStack>>> {
         self.kind
-            .remaining_items(&(self.codec.decode)(value).ok()?, grid)
+            .remaining_items(context, &(self.codec.decode)(value).ok()?, grid)
     }
 }
 impl dyn Registrar + '_ {

@@ -3,7 +3,9 @@
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `sunrise-mod-api` and the vocabulary it re-exports.
 pub mod behaviours;
+pub(crate) mod calls;
 mod expand;
+pub mod extension_tags;
 pub mod notes;
 mod rust;
 #[cfg(test)]
@@ -13,16 +15,17 @@ mod wire_forms;
 
 use crate::catalog::{self, Catalog};
 use crate::index::{Found, Index, ItemId};
+use mod_source::layouts::Layouts;
+use mod_source::layouts::{WireForm, derives, param_names};
 use mod_surface::shape::{ShapeError, Shapes};
 use mod_surface::*;
 use quote::ToTokens;
-use rust::{Layouts, Paths, param_names, print};
+use rust::{GameWires, Paths, print};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use syn::visit_mut::VisitMut;
 use syn::{Item, Visibility};
 use walk::{attrs, compiled, hidden};
-use wire_forms::WireForm;
 
 /// The crates whose own `macro_rules!` calls the export expands: the API and the crates its
 /// public items come from.
@@ -210,20 +213,31 @@ impl Export {
     }
 }
 
-/// Exports the surface of the source tree at `root`.
+/// Exports the surface of the source tree at `root`, with each record's `call` name.
 pub fn export(root: &Path) -> Result<Export, String> {
+    export_with(root, true)
+}
+
+/// Exports the surface of a tree that predates the call names, so records carry none: the old
+/// side of a comparison across the change that introduced them. A tree this reads that does
+/// declare how every type crosses is exported by [`export`].
+pub fn export_without_calls(root: &Path) -> Result<Export, String> {
+    export_with(root, false)
+}
+
+fn export_with(root: &Path, calls: bool) -> Result<Export, String> {
     // The wire index's resolver recurses through the API's types: give it a deep stack.
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn_scoped(scope, || export_here(root))
+            .spawn_scoped(scope, || export_here(root, calls))
             .map_err(|e| e.to_string())?
             .join()
             .map_err(|_| "the surface export panicked".to_string())?
     })
 }
 
-fn export_here(root: &Path) -> Result<Export, String> {
+fn export_here(root: &Path, named: bool) -> Result<Export, String> {
     let catalog = Catalog::load(root).map_err(|e| e.to_string())?;
     let generated = crate::sources(root, crate::FillMode::Require)?;
     let included = [
@@ -235,10 +249,42 @@ fn export_here(root: &Path) -> Result<Export, String> {
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
-    let wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
+    let mut wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
+    let calls = if named {
+        Some(crate::wire::exported_calls(&mut wire, &catalog.hooks)?)
+    } else {
+        None
+    };
     let mut index = wire.types.index;
-    build(root, &mut index, &catalog.hooks, &boundary)
+    let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;
+    if let Some(calls) = &calls {
+        name_calls(&mut export.surface, calls);
+    }
+    Ok(export)
+}
+
+/// Writes each record's `call`: a hook's, and a trait method's when its trait has one name for
+/// it (a generic trait's instances are separate calls and carry none).
+fn name_calls(surface: &mut Surface, calls: &BTreeMap<(String, String), String>) {
+    for hook in &mut surface.hooks {
+        let name = hook.id.strip_prefix("hook:").unwrap_or(&hook.id);
+        hook.call = calls.get(&("Hooks".to_owned(), name.to_owned())).cloned();
+    }
+    for item in &mut surface.traits {
+        let path = item.id.strip_prefix("trait:").unwrap_or(&item.id);
+        let owner = path.rsplit("::").next().unwrap_or(path);
+        for method in &mut item.methods {
+            let name = method.id.rsplit("::").next().unwrap_or(&method.id);
+            let mut found = calls.iter().filter(|((o, m), _)| {
+                m == name && (o == owner || o.split('<').next() == Some(owner) && o.contains('<'))
+            });
+            method.call = match (found.next(), found.next()) {
+                (Some((_, call)), None) => Some(call.clone()),
+                _ => None,
+            };
+        }
+    }
 }
 
 /// The `///` text of `attrs`, one line each, a leading space dropped.
@@ -278,23 +324,6 @@ fn not_on_wasm(attrs: &[syn::Attribute]) -> Option<String> {
 
 fn has_attr(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
-}
-
-/// The traits of `attrs`' `#[derive(…)]` lists, by last path segment, sorted.
-pub(super) fn derives(attrs: &[syn::Attribute]) -> Vec<String> {
-    let mut out = BTreeSet::new();
-    for attr in attrs.iter().filter(|a| a.path().is_ident("derive")) {
-        if let Ok(paths) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
-        ) {
-            for path in paths {
-                if let Some(last) = path.segments.last() {
-                    out.insert(last.ident.to_string());
-                }
-            }
-        }
-    }
-    out.into_iter().collect()
 }
 
 /// Normalises types and signatures written in one module.
@@ -769,7 +798,10 @@ pub(crate) fn build(
     let macros = macros(root, writer.index, &public.macros, &mut notes)?;
 
     // Shapes, over every type the crossing types contain.
-    let mut layouts = Layouts::new(&forms, &nameable);
+    let mut layouts = Layouts::new(GameWires {
+        forms: &forms,
+        ids: &nameable,
+    });
     let keys: Vec<Option<String>> = pending
         .iter()
         .map(|record| {
@@ -831,7 +863,8 @@ pub(crate) fn build(
             parts,
             capabilities,
         )
-        .with_behaviours(behaviours),
+        .with_behaviours(behaviours)
+        .with_extension_tags(extension_tags::read(root)?),
         notes,
     })
 }

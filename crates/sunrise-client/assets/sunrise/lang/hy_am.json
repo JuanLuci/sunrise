@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Տեսք",
   "sunrise.studio.topbar.view_short": "Տեսք",
   "sunrise.studio.unknown_server": "Անհայտ",
-  "sunrise.tempban.dedicated_required": "Ժամանակավոր արգելքները պահանջում են առանձին սերվեր",
-  "sunrise.tempban.invalid_duration": "%s-ը տևողություն չէ. 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s ժամանակավոր արգելք կա՝",
-  "sunrise.tempban.list.empty": "Ժամանակավոր արգելքներ չկան",
-  "sunrise.tempban.list.entry": "%1$s-ին արգելել է %2$s-ը %3$s (մինչև %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s-ով, մինչև %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Կապված չէ Mojang-ի կամ Microsoft-ի հետ"
 }

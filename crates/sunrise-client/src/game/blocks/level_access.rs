@@ -564,6 +564,16 @@ impl LevelAccess for GameLevel<'_> {
             }
         }
     }
+    fn has_held_block_ticks(&self) -> bool {
+        self.native_authoritative && mod_api::__private::any_mod_disabled()
+    }
+    fn hold_block_tick(&self, state: BlockStateId) -> bool {
+        self.native_authoritative
+            && api_values::block_state::block_listens(mod_api::HookId::TickBlock, state)
+            && state.try_into_api().is_ok_and(|state| {
+                mod_api::__private::block_hook_inert(mod_api::HookId::TickBlock, state)
+            })
+    }
     fn before_tick_block(
         &mut self,
         ticks: &mut Ticks,
@@ -626,17 +636,24 @@ impl LevelAccess for GameLevel<'_> {
             );
         }
     }
+    fn fence_gate_in_wall(&self, state: BlockStateId) -> Option<bool> {
+        let mut answer = None;
+        self.native_fence_gate_in_wall(state, &mut answer);
+        answer
+    }
     fn before_can_survive(
         &self,
         ticks: &Ticks,
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
             self.view(ticks)
-                .native_can_survive(self.dimension, pos, state, survives);
+                .native_can_survive(self.dimension, pos, state, survives, &mut inert);
         }
+        inert
     }
     fn before_can_sustain_plant(
         &self,
@@ -644,10 +661,19 @@ impl LevelAccess for GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
-            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
+            self.native_can_sustain_plant(
+                self.dimension,
+                state,
+                ground,
+                ground_pos,
+                sustains,
+                &mut inert,
+            );
         }
+        inert
     }
     fn asks_is_fertile(&self) -> bool {
         self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
@@ -680,10 +706,12 @@ impl LevelAccess for GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        let mut inert = false;
         if self.native_authoritative {
-            self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
+            self.native_may_place_on(self.dimension, state, ground, ground_pos, may, &mut inert);
         }
+        inert
     }
     fn is_client_side(&self) -> bool {
         self.client_side

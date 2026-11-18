@@ -1254,10 +1254,12 @@ fn ai_and_finish_tick(
             super::equine::tail_tick(m);
         }
         // LivingEntity.aiStep: without AI there is no serverAiStep and no
-        // travel, but the motion below 0.003 is still dropped and
-        // pushEntities still runs, so a NoAI mob pushes what it overlaps
-        // (and is pushed back by its own push).
+        // travel, but the motion below 0.003 is still dropped, the block
+        // walk and freezing still run, and pushEntities still runs, so a
+        // NoAI mob pushes what it overlaps (and is pushed back by its own
+        // push).
         drop_tiny_motion(m);
+        walk_and_freeze(m, w, level, events);
         push_entities(m, w, level, events);
         ageable_step(m, w, level, events);
         animal_step(m, events);
@@ -1303,7 +1305,8 @@ fn ai_and_finish_tick(
     finish_tick(m, w, level, was_on_fire, events)
 }
 
-/// Resume the living tick after species AI, before block effects and animation.
+/// Resume the living tick after species AI (and the block walk and freezing
+/// in `LivingEntity.aiStep`), before the wet fire check and animation.
 /// Kept as one continuation so an inline action can regain its owning host and
 /// then run the same remaining work, in the original order.
 #[inline]
@@ -1315,14 +1318,6 @@ pub fn finish_tick(
     events: &mut Vec<MobEvent>,
 ) -> bool {
     count_fall_fly_ticks(m);
-    // `isInPowderSnow`: `Entity.baseTick` clears it and the block walk's FREEZE
-    // effect sets it for a powder snow cell on the tick's path, so a hurt that
-    // teleports the mob during the walk keeps it.
-    m.in_powder_snow = false;
-    effects_from_blocks(m, w, level, events);
-    if m.alive() {
-        freeze_tick(m, w, level, events);
-    }
     extinguish_if_wet(m, w, was_on_fire, events);
     m.reset_unlit_fire();
     if m.species() == Species::SulfurCube && m.alive() {
@@ -1371,6 +1366,23 @@ pub fn finish_tick(
     // TraderLlama.maybeDespawn discards the llama in its aiStep: it leaves the
     // level's entity list in this tick, after the rest of its tick ran.
     !(m.removed && m.species() == Species::TraderLlama)
+}
+/// `LivingEntity.aiStep` after `travel`, with or without AI: the block walk
+/// (`applyEffectsFromBlocks`), then the freezing and its hurt, both before
+/// `pushEntities` (cramming) and the water's hurt (#1760). `isInPowderSnow`
+/// was cleared by `Entity.baseTick`; the walk's FREEZE effect sets it for a
+/// powder snow cell on the tick's path, so a hurt that teleports the mob
+/// during the walk keeps it.
+fn walk_and_freeze(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) {
+    effects_from_blocks(m, w, level, events);
+    if m.alive() {
+        freeze_tick(m, w, level, events);
+    }
 }
 /// `LivingEntity.aiStep` -> `Entity.applyEffectsFromBlocks` for the blocks
 /// that hurt, hold or slide a mob: the cactus (`CactusBlock.entityInside`, 1),
@@ -1974,6 +1986,10 @@ fn base_tick(
             let _ = (m.random.next_double(), m.random.next_double());
         }
     }
+    // Entity.baseTick: `wasInPowderSnow` keeps last tick's walk, and
+    // `isInPowderSnow` waits for this tick's walk to set it.
+    m.was_in_powder_snow = m.in_powder_snow;
+    m.in_powder_snow = false;
     m.was_eye_in_water = m.fluids.eye_in_water;
     m.update_fluids(w, events);
     if m.species() == Species::Drowned {
@@ -2162,8 +2178,9 @@ fn base_tick(
     super::leash::tick(m, w, events);
     was_on_fire
 }
-/// `LivingEntity.aiStep`'s freezing, after movement and the block walk, on
-/// `isInPowderSnow` as the tick's block walk left it (`m.in_powder_snow`).
+/// `LivingEntity.aiStep`'s freezing, after movement and the block walk and
+/// before cramming and the water's hurt, on `isInPowderSnow` as the tick's
+/// block walk left it (`m.in_powder_snow`).
 fn freeze_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     let in_snow = m.in_powder_snow;
     if !in_snow && m.ticks_frozen == 0 {
@@ -2492,8 +2509,10 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
         // A fall's hurt (checkFallDamage) teleports at once.
         hurt_teleports(m, w, events);
     }
-    // LivingEntity.aiStep: applyEffectsFromBlocks follows travel.
+    // LivingEntity.aiStep: applyEffectsFromBlocks follows travel, then
+    // the freezing, before pushEntities and the water's hurt.
     m.apply_effects_from_blocks(w, events);
+    walk_and_freeze(m, w, level, events);
     push_entities(m, w, level, events);
     hurt_by_water(m, w, level, events);
     // Spider.tick: climbing while pressed against a wall.
@@ -2708,7 +2727,7 @@ fn sun_burn_tick(m: &mut Mob, w: &MobWorld) -> bool {
         m.position.z.floor() as i32,
     );
     let br = w.brightness(x, y, z);
-    let wet = m.fluids.in_water || in_rain(m, w) || in_powder_snow(m, w) || m.in_powder_snow;
+    let wet = m.fluids.in_water || in_rain(m, w) || in_powder_snow(m, w) || m.was_in_powder_snow;
     br > 0.5 && m.random.next_float() * 30.0 < (br - 0.4) * 2.0 && !wet && w.can_see_sky(x, y, z)
 }
 // Keep the actual selectors (including partially updated goal state) attached to
@@ -6286,10 +6305,10 @@ mod burn_and_rose_tests {
                 assert!(!m.in_powder_snow);
                 assert!(burns(&mut m), "in plain daylight");
                 // Having been in the powder snow last tick (`wasInPowderSnow`).
-                m.in_powder_snow = true;
+                m.was_in_powder_snow = true;
                 assert!(!burns(&mut m), "was in the powder snow");
                 // It waits that one tick before the sun reaches it.
-                m.in_powder_snow = false;
+                m.was_in_powder_snow = false;
                 assert!(burns(&mut m), "the tick after it stepped out");
             },
         );
@@ -7839,6 +7858,9 @@ mod trader_llama_no_ai_tests {
     }
 }
 
+#[cfg(test)]
+#[path = "aistep_order_tests.rs"]
+mod aistep_order_tests;
 #[cfg(test)]
 #[path = "hurt_teleport_contact_tests.rs"]
 mod hurt_teleport_contact_tests;

@@ -874,5 +874,17 @@
       "kind": "manifest"
     }
   ],
-  "behaviours": []
+  "behaviours": [],
+  "extension_tags": [
+    {
+      "registry": "block",
+      "id": "sunrise:fixture",
+      "doc": "Fixture blocks."
+    },
+    {
+      "registry": "item",
+      "id": "sunrise:fixture",
+      "doc": "Fixture items."
+    }
+  ]
 }

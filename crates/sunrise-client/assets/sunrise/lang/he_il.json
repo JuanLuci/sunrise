@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "תצוגה",
   "sunrise.studio.topbar.view_short": "תצוגה",
   "sunrise.studio.unknown_server": "לא ידוע",
-  "sunrise.tempban.dedicated_required": "חסימות זמניות דורשות שרת ייעודי",
-  "sunrise.tempban.invalid_duration": "%s אינה משך זמן: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "יש %s חסימות זמניות:",
-  "sunrise.tempban.list.empty": "אין חסימות זמניות",
-  "sunrise.tempban.list.entry": "%1$s נחסם על ידי %2$s %3$s (עד %4$s)",
-  "sunrise.tempban.success": "%1$s למשך %2$s, עד %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "לא מזוהה עם Mojang או Microsoft"
 }

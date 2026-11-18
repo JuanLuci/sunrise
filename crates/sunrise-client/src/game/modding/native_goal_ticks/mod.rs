@@ -253,6 +253,14 @@ impl GoalCx<'_, '_> {
         }
     }
 
+    fn r_entity_body_yaw(&self, entity: EntityRef) -> Option<f32> {
+        match self.resolve(entity)? {
+            Resolved::Own if !self.m.removed => Some(self.m.body_yaw),
+            Resolved::Live(mob) => Some(mob.body_yaw),
+            _ => None,
+        }
+    }
+
     fn r_entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
         let bounds = match self.resolve(entity)? {
             Resolved::Own => self.m.bounds(),

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Pogled",
   "sunrise.studio.topbar.view_short": "Pogled",
   "sunrise.studio.unknown_server": "Neznano",
-  "sunrise.tempban.dedicated_required": "Začasne prepovedi potrebujejo namenski strežnik",
-  "sunrise.tempban.invalid_duration": "%s ni trajanje: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Začasnih prepovedi: %s",
-  "sunrise.tempban.list.empty": "Ni začasnih prepovedi",
-  "sunrise.tempban.list.entry": "%1$s je prepovedal %2$s %3$s (do %4$s)",
-  "sunrise.tempban.success": "%1$s za %2$s, do %3$s",
-  "sunrise.tempban.usage": "/tempban <igralec> <trajanje> [razlog]",
   "sunrise.title.not_affiliated": "Ni povezan z Mojangom ali Microsoftom"
 }

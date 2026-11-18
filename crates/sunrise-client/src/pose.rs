@@ -299,16 +299,35 @@ impl MotionWorld<'_, '_, '_> {
     /// allows (the boat the game stores in the player's fluid state), so a boat
     /// afloat keeps the eyes dry.
     pub fn passenger_pose_tick(&mut self) -> Result<()> {
+        self.passenger_base_tick()?;
+        self.passenger_sits_up()
+    }
+    /// `Entity.rideTick` for a rider this client moves (`LocalPlayer`): `Player.tick` takes it off
+    /// the ground and `Entity.baseTick` samples its fluids, as for any passenger; then
+    /// `LivingEntity.aiStep` travels it from where it sat (`rider_travel_tick`), and that move's
+    /// ground and collisions are what its look packet sends; `updatePlayerPose` sits it up.
+    pub fn rider_tick(&mut self, direction: [f32; 2]) -> Result<()> {
+        self.passenger_base_tick()?;
+        self.rider_travel_tick(direction)?;
+        self.passenger_sits_up()
+    }
+    /// A passenger's tick before it could move: the fluids in the box its vehicle allows, off the
+    /// ground, and neither swimming nor gliding.
+    fn passenger_base_tick(&mut self) -> Result<()> {
         self.player.fluids.was_eye_in_water = self.player.is_eye_in_fluid(crate::motion::WATER);
         self.update_fluids()?;
         // Player.tick: a passenger is never on the ground (setOnGround(false)
-        // clears the supporting block too), so its look packets say so.
+        // clears the supporting block too) until its own move says otherwise.
         self.player.ground.on_ground = false;
         self.player.ground.on_ground_no_blocks = false;
         self.player.ground.supporting_block = None;
         self.player.swimming = false;
         self.player.fall_flying = false;
         self.player.fall_fly_ticks = 0;
+        Ok(())
+    }
+    /// `Player.updatePlayerPose` for a passenger.
+    fn passenger_sits_up(&mut self) -> Result<()> {
         self.update_player_pose()?;
         // A cushion's seat puts the feet in the support block, so neither
         // standing nor crawling fits and `updatePlayerPose` keeps the old

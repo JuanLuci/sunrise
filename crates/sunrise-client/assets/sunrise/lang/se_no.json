@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Oaidnu",
   "sunrise.studio.topbar.view_short": "Oaidnu",
   "sunrise.studio.unknown_server": "Dovdameahtun",
-  "sunrise.tempban.dedicated_required": "Gaskaaigásaš gielddusat dárbbašit ommás bálvaleaddji",
-  "sunrise.tempban.invalid_duration": "%s ii leat áigodat: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Leat %s gaskaaigásaš gielddusa:",
-  "sunrise.tempban.list.empty": "Ii leat gaskaaigásaš gielddusat",
-  "sunrise.tempban.list.entry": "%1$s gieldojuvvui %2$s %3$s (gitta %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s várás, gitta %3$s rádjái",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ii leat čadnon Mojang dahje Microsoft"
 }

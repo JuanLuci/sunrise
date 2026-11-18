@@ -74,14 +74,19 @@ fn measure(label: &str, mods: Vec<ModEntry>) {
         .unwrap();
         mod_api::__private::mark_game_thread();
         let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-        for (kind, expected) in [("counter", 23), ("counter_reads", 25)] {
+        for (kind, expected, count) in [
+            ("counter", 23, 1000),
+            ("counter_reads", 25, 1000),
+            // A thousand host calls per tick: the guest-to-host cost, as ns per tick / 1000.
+            ("counter_loop", 26, 100),
+        ] {
             assert!(
                 mod_api::__private::block_entity_types()
                     .iter()
                     .any(|decl| decl.id == format!("wasm_fixture:{kind}")),
                 "{label}: register did not declare wasm_fixture:counter"
             );
-            let mut entities: Vec<_> = (0..1000)
+            let mut entities: Vec<_> = (0..count)
                 .map(|_| ModBlockEntity::new(format!("wasm_fixture:{kind}"), Default::default()))
                 .collect();
             mod_api::dispatch_block_entity_tick(
@@ -121,7 +126,7 @@ fn measure(label: &str, mods: Vec<ModEntry>) {
             samples.sort_unstable();
             let mean = samples.iter().sum::<u128>() / samples.len() as u128;
             println!(
-                "{label} {kind}: 1000 entities mean={mean} ns p95={} ns",
+                "{label} {kind}: {count} entities mean={mean} ns p95={} ns",
                 samples[94]
             );
         }

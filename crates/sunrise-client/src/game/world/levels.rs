@@ -481,6 +481,12 @@ impl Levels {
         self.runtime.clear();
     }
 
+    pub(super) fn abort_parked_generation(&mut self) {
+        for level in self.parked.values_mut() {
+            level.streaming.abort_generation();
+        }
+    }
+
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)
@@ -1286,6 +1292,8 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_post(level);
             }
+            #[cfg(feature = "state-digest")]
+            self.state_digest_tick(dim, running);
             sunrise_client::spans::time("server_debug", || self.publish_server_debug(dim));
             // An entity that crossed into a level that already ticked this
             // server tick is in it when the tick ends (`addDuringTeleport`).

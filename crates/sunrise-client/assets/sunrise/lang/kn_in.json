@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "ನೋಟ",
   "sunrise.studio.topbar.view_short": "ನೋಟ",
   "sunrise.studio.unknown_server": "ಅಜ್ಞಾತ",
-  "sunrise.tempban.dedicated_required": "ತಾತ್ಕಾಲಿಕ ನಿಷೇಧಗಳಿಗೆ ಮೀಸಲಾದ ಸರ್ವರ್ ಬೇಕು",
-  "sunrise.tempban.invalid_duration": "%s ಒಂದು ಅವಧಿ ಅಲ್ಲ: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s ತಾತ್ಕಾಲಿಕ ನಿಷೇಧ(ಗಳು) ಇವೆ:",
-  "sunrise.tempban.list.empty": "ಯಾವುದೇ ತಾತ್ಕಾಲಿಕ ನಿಷೇಧಗಳಿಲ್ಲ",
-  "sunrise.tempban.list.entry": "%1$s ಅನ್ನು %2$s %3$s ನಿಷೇಧಿಸಿದರು (%4$s ರವರೆಗೆ)",
-  "sunrise.tempban.success": "%1$s %2$s ಕಾಲ, %3$s ರವರೆಗೆ",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang ಅಥವಾ Microsoft ನೊಂದಿಗೆ ಸಂಯೋಜಿತವಾಗಿಲ್ಲ"
 }

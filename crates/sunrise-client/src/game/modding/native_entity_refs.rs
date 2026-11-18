@@ -735,41 +735,14 @@ impl Game<'_> {
         face: BlockFace,
         support: mod_api::SupportType,
     ) -> Option<bool> {
-        let state = self.level_block_state(level, pos)?;
-        let direction = block_face_direction(face);
-        let b = self.res.behaviours();
-        let binding = self.res.collision();
-        if !b.has_cached_support(state) || binding.publishes_shapes(state) {
-            use sunrise_client::collisions::SceneCollisions;
-            use sunrise_world::{block_support::SupportType, dynamic_support::DynamicSupport};
-            let world = self.native_level_world(level)?;
-            let mut scene = SceneCollisions {
-                world,
-                binding,
-                subject: None,
-            };
-            let support = match support {
-                mod_api::SupportType::Full => SupportType::Full,
-                mod_api::SupportType::Center => SupportType::Center,
-                mod_api::SupportType::Rigid => SupportType::Rigid,
-                _ => unreachable!("mod_api::SupportType: unhandled variant"),
-            };
-            // A state that may publish takes its block entity's shape, else its declared one.
-            if binding.publishes_shapes(state) {
-                let shape = binding.collision_shape(&mut scene, state, pos).ok()?;
-                return support.is_supporting(&shape, direction).ok();
-            }
-            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
-            return dynamic
-                .is_face_sturdy(&mut scene, pos, direction, support)
-                .ok();
-        }
-        Some(match support {
-            mod_api::SupportType::Full => b.is_face_sturdy(state, direction),
-            mod_api::SupportType::Center => b.is_face_sturdy_center(state, direction),
-            mod_api::SupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
-            _ => unreachable!("mod_api::SupportType: unhandled variant"),
-        })
+        super::native_world_read::block_face_sturdy(
+            self.native_level_world(level)?,
+            self.res.behaviours(),
+            self.res.collision(),
+            pos,
+            face,
+            support,
+        )
     }
 
     /// Clip an empty-context ray against collider or outline shapes, without fluids, in the

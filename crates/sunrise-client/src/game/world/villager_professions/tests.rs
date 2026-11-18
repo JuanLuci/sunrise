@@ -316,21 +316,19 @@ fn wasm_profession(value: ProfessionDefinition, owner: &str) -> mod_api::ModEntr
         (@custom "dylink.0" "\01\04\00\00\00\00")
         (import "env" "memory" (memory 1))
         (import "env" "__indirect_function_table" (table 1 funcref))
-        (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-        (import "sunrise" "host_reply" (func $reply (param i32)))
+        {imports}
         (data (i32.const 2048) "{subscriptions}")
         (data (i32.const 4096) "{declaration}")
-        (func (export "sunrise_layout") (result i64) i64.const {layout})
         (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-        (func (export "sunrise_hook") (param i32) (result i64)
-            local.get 0 i32.eqz if (result i64)
+        (func (export "sunrise_hook") (param i64) (result i64)
+            local.get 0 i64.const {subscribed} i64.eq if (result i64)
                 i64.const {sub_reply}
-            else local.get 0 i32.const {hook} i32.eq if (result i64)
+            else local.get 0 i64.const {hook} i64.eq if (result i64)
                 i32.const {operation} i32.const 4096 i32.const {length} i32.const 0 i32.const 0 call $host
                 i32.const 0 i32.ne if unreachable end
                 i64.const 0
             else i64.const 0 end end))"#,
-            subscriptions=data(&subscriptions), declaration=data(&declaration), layout=*mod_api::wire::LAYOUT,
+            subscriptions=data(&subscriptions), declaration=data(&declaration), imports=sunrise_mod_wasm::fixture::wat_imports(), subscribed=sunrise_mod_wasm::fixture_subscribed_id(),
             sub_reply=(2048u64<<32)|subscriptions.len() as u64, length=declaration.len())).unwrap();
     let manifest = sunrise_mod_package::manifest::Manifest::parse(&format!("id = '{owner}'\nname = 'Wasm engineer'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
     let mut loaded = sunrise_mod_wasm::load(

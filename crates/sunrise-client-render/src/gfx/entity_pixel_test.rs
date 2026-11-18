@@ -453,18 +453,22 @@ fn render_layers_lit(
             }),
             ..Default::default()
         });
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &frame.group, &[]);
-        pass.set_vertex_buffer(0, vertex.slice(..));
-        pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
-        if let Some(hdr_pipeline) = &hdr_pipeline {
-            pass.set_pipeline(hdr_pipeline);
+        // An empty scene still clears and reads back the target, but wgpu refuses
+        // a slice of a zero-sized buffer. There is nothing to bind or draw here.
+        if !indices.is_empty() {
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &frame.group, &[]);
+            pass.set_vertex_buffer(0, vertex.slice(..));
+            pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
-        }
-        if indices.len() as u32 > entity_quads * 6 {
-            pass.set_pipeline(&see_through_pipeline);
-            pass.draw_indexed(entity_quads * 6..indices.len() as u32, 0, 0..1);
+            if let Some(hdr_pipeline) = &hdr_pipeline {
+                pass.set_pipeline(hdr_pipeline);
+                pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+            }
+            if indices.len() as u32 > entity_quads * 6 {
+                pass.set_pipeline(&see_through_pipeline);
+                pass.draw_indexed(entity_quads * 6..indices.len() as u32, 0, 0..1);
+            }
         }
     }
     readback(&frame, encoder)

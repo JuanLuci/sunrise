@@ -116,6 +116,7 @@ fn run() {
                         inputs: vec![0],
                         outputs: vec![0],
                         faces: std::array::from_fn(|_| vec![0]),
+                        insert_rules: Vec::new(),
                         menu: None,
                     }),
                 )]

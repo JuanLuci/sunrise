@@ -7,6 +7,7 @@
 mod navigation;
 
 use super::event_loop::EventLoopCtl;
+use super::owner_link::{ControlRequest, OwnerRequest};
 use super::{Game, Screen};
 use navigation::{Cell, Node, Plan, Progress};
 use serde_json::{Value, json};
@@ -485,7 +486,6 @@ impl Game<'_> {
             Screen::DebugOptions => "debug-options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
-            Screen::Studio => "studio",
         }
     }
     pub(super) fn inventory_counts(&self) -> BTreeMap<String, i64> {
@@ -1809,7 +1809,9 @@ impl Game<'_> {
                 // Single player's console is its server thread's.
                 if let Some(server) = &self.integrated {
                     let (chat, outcome) = server
-                        .call(move |g| g.owner_console_command(&command))
+                        .ask(|reply| {
+                            OwnerRequest::Control(ControlRequest::ConsoleCommand { command, reply })
+                        })
                         .ok_or(super::integrated::NO_ANSWER)?;
                     return ok(command_reply(chat, outcome));
                 }

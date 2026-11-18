@@ -429,6 +429,12 @@ impl Manifest {
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
             ));
         }
+        if RESERVED_NAMESPACES.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a reserved namespace, not a mod's to claim",
+                m.id
+            ));
+        }
         if reserved_mod_id(&m.id) {
             return Err(format!(
                 "{MANIFEST}: id {:?} is a reserved Windows device name",
@@ -1163,6 +1169,16 @@ impl Package {
     pub fn pack_directory_with(root: &Path, uses: Option<&[u8]>) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
+        // A source folder with the old file is valid to read and to build from; a package is
+        // written only from a file the build wrote again.
+        if let Some(bytes) = files.get(crate::layouts::FILE)
+            && crate::layouts::Layouts::read(bytes.as_slice())?.is_legacy()
+        {
+            return Err(format!(
+                "{}: a file of the old format: build the mod again to write it",
+                crate::layouts::FILE
+            ));
+        }
         if let Some(uses) = uses {
             files.insert(USES_FILE.to_owned(), uses.to_vec());
         }
@@ -1683,13 +1699,14 @@ capabilities = ["registries"]
 
     #[test]
     fn layout_metadata_round_trips_and_malformed_archives_are_refused() {
-        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#;
+        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef0123456789abcdef"}}"#;
         let bytes = Package::write_files(EXAMPLE, &[("layouts.json", layouts)]).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
-        let changed =
-            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef"}}"#.as_slice())
-                .unwrap();
+        let changed = crate::layouts::Layouts::read(
+            br#"{"ruby":{"ruby::T":"1123456789abcdef1123456789abcdef"}}"#.as_slice(),
+        )
+        .unwrap();
         assert_eq!(
             package.layouts.first_difference("ruby", &changed),
             Some("ruby::T")
@@ -1840,6 +1857,20 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn reserved_namespaces_cannot_be_the_mod_id() {
+        for id in RESERVED_NAMESPACES {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST)
+                    && error.contains(id)
+                    && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn the_mods_screen_fields_are_optional_and_links_must_be_http() {
         let m = Manifest::parse(EXAMPLE).unwrap();
         assert!(m.license.is_empty() && m.credits.is_empty());
@@ -1869,7 +1900,7 @@ issues = \"http://example.org/issues\"
         // A minimal valid shared member: a `dylink.0` section and the three guest exports.
         let module = wat::parse_str(
             r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout")) (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
+                (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
         )
         .unwrap();
         let text = format!(
@@ -2142,6 +2173,25 @@ issues = \"http://example.org/issues\"
         symlink(&dir, &link).unwrap();
         let error = Package::read(&link).err().unwrap();
         assert!(error.contains("unsupported file type"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_package_is_not_written_from_old_width_layout_metadata() {
+        let root = std::env::temp_dir().join(format!("legacy-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::write(
+            root.join(crate::layouts::FILE),
+            br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        // The folder reads and its files select; only writing the archive refuses.
+        let package = Package::read(&root).unwrap();
+        assert!(package.directory_files(&root).is_ok());
+        let error = Package::pack_directory_with(&root, None).unwrap_err();
+        assert!(error.contains("old format"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

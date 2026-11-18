@@ -48,12 +48,6 @@ d=$(mktemp -d) && npm install --prefix "$d" playwright && npx --prefix "$d" play
 NODE_PATH="$d/node_modules" node -e 'const {chromium}=require("playwright");(async()=>{const b=await chromium.launch();const p=await b.newPage({viewport:{width:1600,height:1000}});await p.goto("https://playsunrise.net/",{waitUntil:"networkidle"});await p.click(".theme-toggle");await p.waitForTimeout(1200);await p.evaluate(()=>{for(const s of ["header",".hero-actions",".download-meta",".lede"]){const e=document.querySelector(s);if(e)e.style.display="none"}});await p.waitForTimeout(400);await p.screenshot({path:"docs/media/banner.webp",clip:{x:0,y:136,width:1600,height:600}});await b.close()})()'
 ```
 
-## Drawn in code
-
-| Where | What |
-|-------|------|
-| `crates/sunrise-client-render/src/title_edition.rs` | the R, U and S of "RUST EDITION" under the classic title screen's logo: Sunrise's own glyphs (MIT), rectangles in that file. The banner is rebuilt at load time from the player's own `textures/gui/title/edition.png` (its "EDITION" and "T" carried over, its shades sampled), so no Mojang pixels are in the repository; a resource pack's banner is left as drawn |
-
 ## Uploading (the accounts are Ludovic's)
 
 - **GitHub avatar**: github.com/settings/profile (or the organisation's settings), *Edit* the

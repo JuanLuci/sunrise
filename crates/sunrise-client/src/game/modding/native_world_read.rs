@@ -12,6 +12,59 @@ use sunrise_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 
+/// Shared by the level handle and the restricted block-hook view.
+pub(super) fn block_face_sturdy(
+    world: &World,
+    b: &Behaviours,
+    binding: &sunrise_world::block_collision::BlockCollisionRegistry<'_>,
+    pos: [i32; 3],
+    face: mod_api::BlockFace,
+    support: mod_api::SupportType,
+) -> Option<bool> {
+    if !world.is_loaded_at(pos[0], pos[1], pos[2]) {
+        return None;
+    }
+    let state = world.block(pos[0], pos[1], pos[2]);
+    let direction = super::native_entity_refs::block_face_direction(face);
+    if !b.has_cached_support(state) || binding.publishes_shapes(state) {
+        use sunrise_client::collisions::SceneCollisions;
+        use sunrise_world::{block_support::SupportType, dynamic_support::DynamicSupport};
+        let mut scene = SceneCollisions {
+            world,
+            binding,
+            subject: None,
+        };
+        let support = match support {
+            mod_api::SupportType::Full => SupportType::Full,
+            mod_api::SupportType::Center => SupportType::Center,
+            mod_api::SupportType::Rigid => SupportType::Rigid,
+            _ => unreachable!("mod_api::SupportType: unhandled variant"),
+        };
+        // A state that may publish takes its block entity's shape, else its declared one.
+        if binding.publishes_shapes(state) {
+            let shape = binding.collision_shape(&mut scene, state, pos).ok()?;
+            return support.is_supporting(&shape, direction).ok();
+        }
+        let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
+        return dynamic
+            .is_face_sturdy(&mut scene, pos, direction, support)
+            .ok();
+    }
+    Some(match support {
+        mod_api::SupportType::Full => b.is_face_sturdy(state, direction),
+        mod_api::SupportType::Center => b.is_face_sturdy_center(state, direction),
+        mod_api::SupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+        _ => unreachable!("mod_api::SupportType: unhandled variant"),
+    })
+}
+
+/// Shared full-skylight query; never reads an unloaded chunk.
+pub(super) fn can_see_sky(world: &World, pos: [i32; 3]) -> Option<bool> {
+    world.is_loaded_at(pos[0], pos[1], pos[2]).then(|| {
+        super::native_level_refs::world_brightness(world, mod_api::LightLayer::Sky, pos) >= 15
+    })
+}
+
 /// Why a server block cannot be read.
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq)]

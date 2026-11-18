@@ -38,10 +38,6 @@ impl Reply {
         Self::translated("argument.entity.notfound.player", &[])
     }
 
-    pub(super) fn already_banned() -> Self {
-        Self::translated("commands.ban.failed", &[])
-    }
-
     pub(super) fn duration(millis: i64) -> Text {
         use chat_guard::DurationUnit;
         let (count, unit) = chat_guard::duration_parts(millis);
@@ -411,13 +407,9 @@ mod tests {
 
     #[test]
     fn vanillas_messages_go_out_as_its_translation_keys() {
-        for (reply, key) in [
-            (Reply::no_player(), "argument.entity.notfound.player"),
-            (Reply::already_banned(), "commands.ban.failed"),
-        ] {
-            assert_eq!(reply.tag(), translatable(key, &[]));
-            assert_eq!(reply.text().translation_key(), Some(key));
-        }
+        let (reply, key) = (Reply::no_player(), "argument.entity.notfound.player");
+        assert_eq!(reply.tag(), translatable(key, &[]));
+        assert_eq!(reply.text().translation_key(), Some(key));
     }
 
     #[test]

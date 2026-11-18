@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vy",
   "sunrise.studio.topbar.view_short": "Vy",
   "sunrise.studio.unknown_server": "Okänd",
-  "sunrise.tempban.dedicated_required": "Tillfälliga bannlysningar kräver en dedikerad server",
-  "sunrise.tempban.invalid_duration": "%s är ingen varaktighet: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Det finns %s tillfälliga bannlysningar:",
-  "sunrise.tempban.list.empty": "Det finns inga tillfälliga bannlysningar",
-  "sunrise.tempban.list.entry": "%1$s bannlystes av %2$s %3$s (till %4$s)",
-  "sunrise.tempban.success": "%1$s i %2$s, till %3$s",
-  "sunrise.tempban.usage": "/tempban <spelare> <varaktighet> [orsak]",
   "sunrise.title.not_affiliated": "Ej ansluten till Mojang eller Microsoft"
 }

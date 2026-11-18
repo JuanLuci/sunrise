@@ -643,7 +643,12 @@ fn dispatch_contracts() {
         ..Parts::default()
     });
     let mut lines = Vec::new();
-    dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
+    dispatch_tooltip(
+        &host,
+        &ItemStack::default(),
+        &mod_api::mod_api::TooltipAppendContext,
+        &mut lines,
+    );
     assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
     let source = HurtSource {
         damage_type: "damage",

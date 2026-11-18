@@ -1913,6 +1913,14 @@ impl Game<'_> {
         };
         let rest: Vec<&str> = words.collect();
         let lit = |s: &str| Text::literal(s.to_owned());
+        #[cfg(feature = "state-digest")]
+        if command == "digest-sync" {
+            match self.as_console_in_overworld(|g| g.state_digest_sync(&rest)) {
+                Ok(()) => log("INFO", "digest-sync done"),
+                Err(e) => log("WARN", &format!("digest-sync: {e}")),
+            }
+            return;
+        }
         match command {
             "stop" => {
                 self.console_reply(Text::translate("commands.stop.stopping", &[]));
@@ -2087,17 +2095,6 @@ impl Game<'_> {
                 if let Some(mut host) = self.lan.take() {
                     let words: Vec<&str> = [command].into_iter().chain(rest).collect();
                     let replies = self.mute_command(&mut host, &words, "Server");
-                    self.lan = Some(host);
-                    for reply in replies {
-                        self.console_reply(reply.text());
-                    }
-                }
-            }
-            // Sunrise's temporary ban (game/administration/tempban.rs), as an operator's `/tempban`.
-            command if super::tempban::TEMPBAN_COMMANDS.contains(&command) => {
-                if let Some(mut host) = self.lan.take() {
-                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.tempban_command(&mut host, &words, "Server");
                     self.lan = Some(host);
                     for reply in replies {
                         self.console_reply(reply.text());
@@ -2583,6 +2580,8 @@ impl Game<'_> {
     }
 
     pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
+        self.streaming.abort_generation();
+        self.levels.abort_parked_generation();
         // The close request starts before player and world saves.
         self.native_lifecycle.begin_close();
         self.native_configs_server_stop();
@@ -3070,7 +3069,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A temporary ban (`/tempban`, the chat filter's) keeps the player out and says when it ends;
+    /// A temporary ban (the chat filter's) keeps the player out and says when it ends;
     /// once it has ended, or after `/pardon`, they come in.
     #[test]
     fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {

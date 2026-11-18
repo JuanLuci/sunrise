@@ -50,7 +50,7 @@ impl IPayloadContext for UnusedContext {
 #[test]
 fn actual_guest_contention_returns_original_payload_without_encoding_or_waiting() {
     crate::test_stack::on_guest_stack(|| {
-        let random_id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let random_id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let holder_export = crate::boundary::export_id("PayloadWork", "run").unwrap();
         let mut success = Writer::new();
         success.put(&Result::<(), PayloadHandleError>::Ok(()));
@@ -61,9 +61,8 @@ fn actual_guest_contention_returns_original_payload_without_encoding_or_waiting(
             .collect::<String>();
         let reply = (4096u64 << 32) | success.bytes().len() as u64;
         let bytes = guest_with_exports(
-            *mod_api::wire::LAYOUT,
             &format!(
-                "local.get 0 i32.const {holder_export} i32.eq if (result i64) \
+                "local.get 0 i64.const {holder_export} i64.eq if (result i64) \
                  i32.const {random_id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop \
                  i64.const 8796093022216 else i64.const {reply} end"
             ),
@@ -239,7 +238,6 @@ fn guest_returned_busy_also_preserves_the_original_host_allocation() {
             .collect::<String>();
         let reply = (4096u64 << 32) | answer.bytes().len() as u64;
         let bytes = guest_with_exports(
-            *mod_api::wire::LAYOUT,
             &format!("i64.const {reply}"),
             &format!("(data (i32.const 4096) \"{data}\")"),
         );

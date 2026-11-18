@@ -123,7 +123,7 @@ fn static_string_id_reply_decodes_without_allocating() {
     definition.put("minecraft:overworld");
     let bytes = definition.into_bytes();
     guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
-    let first = guest::host(0, guest::begin());
+    let first = guest::host_named("test", guest::begin());
     assert_eq!(first.take_static::<()>().unwrap().0, "minecraft:overworld");
     drop(first);
     let mut known = Writer::new();
@@ -131,7 +131,7 @@ fn static_string_id_reply_decodes_without_allocating() {
     known.put(&0u32);
     let bytes = known.into_bytes();
     guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
-    let reply = guest::host(0, guest::begin());
+    let reply = guest::host_named("test", guest::begin());
     guest::set_transport(None);
     let mut old = Writer::new();
     old.put("minecraft:overworld");

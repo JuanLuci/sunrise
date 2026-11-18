@@ -24,7 +24,7 @@ pub(super) fn register(r: &mut dyn mod_api::Registrar) {
 pub(super) fn helmet() -> mod_api::ItemKey {
     HELMET.get().unwrap()
 }
-pub(super) fn record(id: u32, bytes: &[u8]) {
+pub(super) fn record(id: u64, bytes: &[u8]) {
     COPIES.with(|copies| {
         let mut copies = copies.borrow_mut();
         if id == slots::PREPARE {

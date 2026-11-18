@@ -4,17 +4,19 @@
 mod append;
 mod borrowed;
 mod calls;
+mod descriptors;
 mod host;
 mod prepared;
 #[cfg(test)]
 mod prepared_tests;
+#[cfg(test)]
+mod protocol_pin;
 pub use host::{generate_coverage, generate_host};
 mod trait_roles;
 mod ty;
 
 use crate::capability_providers::key_shapes;
 use crate::index::{Found, Index};
-use std::fmt::Write as _;
 use std::path::Path;
 use syn::{FnArg, Item, Pat, ReturnType, TraitItem};
 use ty::{Ty, Types};
@@ -205,6 +207,22 @@ pub(super) struct Method {
     pub(super) receiver: Option<bool>,
     pub(super) params: Vec<(String, Ty)>,
     pub(super) ret: Ty,
+    /// The types as written, for the shape of the call (`names`).
+    pub(super) syntax: Option<Syntax>,
+}
+
+/// The ids below this are the transport's own (`mod_api::wire::RESERVED_IDS`).
+const RESERVED_IDS: u64 = 0x1_0000;
+
+/// A method's types as the source writes them.
+#[derive(Debug)]
+pub(super) struct Syntax {
+    pub(super) module: usize,
+    /// Token text of each parameter's type, receiver left out.
+    pub(super) params: Vec<String>,
+    pub(super) ret: Option<String>,
+    pub(super) trait_params: Vec<String>,
+    pub(super) owner_args: Vec<String>,
 }
 
 /// A method that can't cross, and why.
@@ -268,7 +286,7 @@ pub(super) fn surface_reading<'a>(
     included: &'a [(&'a str, &'a str)],
     mut missing: Option<&mut Vec<String>>,
 ) -> Result<Surface<'a>, String> {
-    let mut types = Types::new(Index::new(root, included))?;
+    let mut types = Types::new(crate::index::game(root, included))?;
     let api = types.index.module("mod_api", &[])?;
     let mut declared = trait_roles::declared(root)?;
     types
@@ -367,6 +385,35 @@ pub(super) fn surface_reading<'a>(
             match method(&mut types, *module, owner, function, &subst) {
                 Ok(mut method) => {
                     method.via = via.clone();
+                    method.syntax = Some(Syntax {
+                        module: *module,
+                        params: function
+                            .sig
+                            .inputs
+                            .iter()
+                            .filter_map(|input| match input {
+                                FnArg::Typed(arg) => {
+                                    Some(quote::ToTokens::to_token_stream(&arg.ty).to_string())
+                                }
+                                FnArg::Receiver(_) => None,
+                            })
+                            .collect(),
+                        ret: match &function.sig.output {
+                            ReturnType::Default => None,
+                            ReturnType::Type(_, ty) => {
+                                Some(quote::ToTokens::to_token_stream(ty).to_string())
+                            }
+                        },
+                        trait_params: item
+                            .generics
+                            .type_params()
+                            .map(|p| p.ident.to_string())
+                            .collect(),
+                        owner_args: args
+                            .iter()
+                            .map(|ty| quote::ToTokens::to_token_stream(ty).to_string())
+                            .collect(),
+                    });
                     methods.push(method);
                 }
                 Err(why) => unbound.push(Unbound { owner, name, why }),
@@ -441,6 +488,226 @@ pub(super) fn fallible_frame_accessor(method: &Method) -> Option<(&str, bool, &T
         .iter()
         .any(|owner| owner.rsplit("::").next() == Some(name.as_str()))
         .then_some((name.as_str(), *mutable, &**error))
+}
+
+/// The name of every method that crosses, by (owner, method): what the guest imports or
+/// exports it as, and what the game's table lists it as.
+pub(super) struct Names {
+    by_method: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    /// The calls a mod makes on a game object of an exported trait it holds (`held-` imports).
+    held: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    /// The three named entries of each prepared hook, by (hook, entry).
+    prepared: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+}
+
+impl Names {
+    pub(super) fn get(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+        self.by_method
+            .get(&(owner.to_owned(), method.to_owned()))
+            .unwrap_or_else(|| panic!("no name for {owner}::{method}"))
+    }
+
+    pub(super) fn held(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+        self.held
+            .get(&(owner.to_owned(), method.to_owned()))
+            .unwrap_or_else(|| panic!("no held name for {owner}::{method}"))
+    }
+
+    pub(super) fn prepared(&self, hook: &str, entry: &str) -> &mod_surface::call::Name {
+        self.prepared
+            .get(&(hook.to_owned(), entry.to_owned()))
+            .unwrap_or_else(|| panic!("no name for prepared {hook} entry {entry}"))
+    }
+
+    /// Every export a mod may implement, with the owner and method it is written as in
+    /// `__sunrise_mark!`, sorted: the methods of the exported traits, then the prepared entries.
+    pub(super) fn marked(&self) -> Vec<(&str, &str, &mod_surface::call::Name)> {
+        let mut out: Vec<_> = self
+            .by_method
+            .iter()
+            .filter(|((owner, _), _)| exports().contains(&owner.as_str()))
+            .map(|((owner, method), name)| (owner.as_str(), method.as_str(), name))
+            .chain(
+                self.prepared
+                    .iter()
+                    .map(|((_, entry), name)| ("ItemPart", entry.as_str(), name)),
+            )
+            .collect();
+        out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        out
+    }
+
+    /// Every export's id, which must be distinct.
+    pub(super) fn check_ids(&self) -> Result<(), String> {
+        let mut seen = std::collections::HashMap::new();
+        for name in self
+            .by_method
+            .iter()
+            .filter(|((owner, _), _)| exports().contains(&owner.as_str()))
+            .map(|(_, name)| name)
+            .chain(self.prepared.values())
+        {
+            if name.export_id() < RESERVED_IDS {
+                return Err(format!(
+                    "{} has an id in the transport's block",
+                    name.text()
+                ));
+            }
+            if let Some(other) = seen.insert(name.export_id(), name.text()) {
+                return Err(format!(
+                    "{} and {} have one export id: widen the hash or rename one",
+                    other,
+                    name.text()
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The hook's side as its name, for the hash.
+fn side_word(side: &crate::catalog::Side) -> &'static str {
+    match side {
+        crate::catalog::Side::Server => "server",
+        crate::catalog::Side::Client => "client",
+        crate::catalog::Side::Both => "both",
+    }
+}
+
+/// The name text of every call the surface names, by (owner as the wire writes it, method): what
+/// `surface.json` lists as each record's `call`.
+pub(crate) fn exported_calls(
+    surface: &mut Surface<'_>,
+    hooks: &[crate::catalog::Hook],
+) -> Result<std::collections::BTreeMap<(String, String), String>, String> {
+    let prepared: Vec<(String, String)> = hooks
+        .iter()
+        .filter_map(|hook| {
+            hook.prepared
+                .clone()
+                .map(|field| (hook.name.clone(), field))
+        })
+        .collect();
+    let names = call_names(surface, hooks, &prepared)?;
+    Ok(names
+        .by_method
+        .iter()
+        .map(|(key, name)| (key.clone(), name.text()))
+        .collect())
+}
+
+/// Names every method of the surface that crosses (see `surface::calls`), the calls a mod makes
+/// on objects it holds, and the entries of the prepared hooks.
+pub(super) fn call_names(
+    surface: &mut Surface<'_>,
+    hooks: &[crate::catalog::Hook],
+    prepared: &[(String, String)],
+) -> Result<Names, String> {
+    use crate::surface::calls::Call;
+    use mod_surface::call::Kind;
+    let parse = |text: &String| syn::parse_str::<syn::Type>(text).map_err(|e| e.to_string());
+    let mut calls = Vec::new();
+    // (table, owner, method) of each call, in order.
+    let mut keys: Vec<(u8, String, String)> = Vec::new();
+    for m in &surface.methods {
+        let syntax = m
+            .syntax
+            .as_ref()
+            .ok_or_else(|| format!("{}::{} has no source types", m.owner, m.name))?;
+        let hook = (m.owner == "Hooks")
+            .then(|| hooks.iter().find(|h| h.name == m.name))
+            .flatten();
+        let kind = if imports().contains(&m.owner) {
+            Kind::Call
+        } else if m.owner == "Hooks" {
+            Kind::Hook
+        } else {
+            Kind::Part
+        };
+        let private = {
+            let tys: Vec<&Ty> = m
+                .params
+                .iter()
+                .map(|(_, ty)| ty)
+                .chain(std::iter::once(&m.ret))
+                .collect();
+            mod_surface::shape::digest(&descriptors::text(&surface.types, &tys))
+        };
+        let call =
+            |kind, owner: String, hook: Option<&crate::catalog::Hook>| -> Result<Call, String> {
+                Ok(Call {
+                    kind,
+                    owner,
+                    method: m.name.clone(),
+                    receiver: m.receiver,
+                    module: syntax.module,
+                    params: syntax.params.iter().map(parse).collect::<Result<_, _>>()?,
+                    ret: syntax.ret.as_ref().map(parse).transpose()?,
+                    trait_params: syntax.trait_params.clone(),
+                    owner_args: syntax
+                        .owner_args
+                        .iter()
+                        .map(parse)
+                        .collect::<Result<_, _>>()?,
+                    extra: format!("{};{private}", hook.map_or("", |h| side_word(&h.side))),
+                    version: hook.and_then(|h| u32::try_from(h.version).ok()),
+                })
+            };
+        calls.push(call(kind, m.owner.to_owned(), hook)?);
+        keys.push((0, m.owner.to_owned(), m.name.clone()));
+        if held(m.owner) {
+            calls.push(call(Kind::Call, format!("held::{}", m.owner), None)?);
+            keys.push((1, m.owner.to_owned(), m.name.clone()));
+        }
+    }
+    let api = surface.types.index.module("mod_api", &[])?;
+    for abi in prepared::describe(&surface.methods, prepared)? {
+        for entry in &abi.entries {
+            let types = |parts: &[&str]| -> Result<Vec<syn::Type>, String> {
+                parts
+                    .iter()
+                    .map(|part| {
+                        let (_, ty) = part.split_once(':').ok_or("prepared argument has a role")?;
+                        syn::parse_str(ty).map_err(|e: syn::Error| e.to_string())
+                    })
+                    .collect()
+            };
+            let output = types(&entry.output)?;
+            calls.push(Call {
+                kind: Kind::Part,
+                owner: "ItemPart".to_owned(),
+                method: entry.name.clone(),
+                receiver: None,
+                module: api,
+                params: types(&entry.input)?,
+                ret: Some(syn::Type::Tuple(syn::TypeTuple {
+                    paren_token: Default::default(),
+                    elems: output.into_iter().collect(),
+                })),
+                trait_params: Vec::new(),
+                owner_args: Vec::new(),
+                extra: abi.hook.clone(),
+                version: None,
+            });
+            keys.push((2, abi.hook.clone(), entry.name.clone()));
+        }
+    }
+    let names = crate::surface::calls::names(&mut surface.types.index, &calls)?;
+    let mut table = Names {
+        by_method: Default::default(),
+        held: Default::default(),
+        prepared: Default::default(),
+    };
+    for ((which, owner, method), name) in keys.into_iter().zip(names) {
+        match which {
+            0 => &mut table.by_method,
+            1 => &mut table.held,
+            _ => &mut table.prepared,
+        }
+        .insert((owner, method), name);
+    }
+    table.check_ids()?;
+    Ok(table)
 }
 
 /// The coverage check: every method of the bound traits crosses to wasm, or its doc says why
@@ -547,6 +814,7 @@ fn method(
         receiver,
         params,
         ret,
+        syntax: None,
     })
 }
 
@@ -581,8 +849,19 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     let providers = crate::capability_providers::generate(root, included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
-    let surface = surface(root, &with_providers)?;
+    let mut surface = surface(root, &with_providers)?;
     coverage(&surface)?;
+    let catalog = crate::Catalog::load(root)?;
+    let prepared = catalog
+        .hooks
+        .iter()
+        .filter_map(|hook| {
+            hook.prepared
+                .clone()
+                .map(|field| (hook.name.clone(), field))
+        })
+        .collect::<Vec<_>>();
+    let names = call_names(&mut surface, &catalog.hooks, &prepared)?;
     let mut wire = borrowed::calls(&surface.types);
     let mut guest = calls::guest(
         &surface.types,
@@ -590,33 +869,12 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         &surface.dropped,
         &surface.excused,
         &surface.parts,
+        &names,
     );
     guest.push_str(&calls::hook_names(&surface.hooks));
-    let prepared = crate::Catalog::load(root)?
-        .hooks
-        .into_iter()
-        .filter_map(|hook| hook.prepared.map(|field| (hook.name, field)))
-        .collect::<Vec<_>>();
-    guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared).0);
-    let abis = prepared::describe(&surface.methods, &prepared)?;
-    let _ = writeln!(
-        wire,
-        "#[doc(hidden)]\npub fn wire_core_layout() -> u64 {{ let mut hash = {:#x}; {layouts} hash }}",
-        layout(&surface),
-        layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
-    );
-    writeln!(
-        wire,
-        "#[doc(hidden)] pub fn prepared_abi_layout() -> u64 {{ {} }}",
-        prepared::layout_code(&abis)
-    )
-    .unwrap();
-    let complete = if abis.is_empty() {
-        "wire_core_layout()"
-    } else {
-        "crate::wire::layout_mix(wire_core_layout(),prepared_abi_layout())"
-    };
-    writeln!(wire, "#[doc(hidden)] pub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ {complete} }});").unwrap();
+    guest.push_str(&calls::dispatch(&surface.types, &surface.methods, &prepared, &names).0);
+    guest.push_str(&calls::protocol_module());
+    wire.push_str(&calls::mark_macro(&names));
     let sources = surface.types.index.read.take();
     Ok(Generated {
         wire,
@@ -636,7 +894,7 @@ pub(crate) fn owned_types(
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let mut surface = surface(root, &with_providers)?;
-    // Every owned signature def appears in generated WIRE_LAYOUT with a Wire bound.
+    // Every owned signature def appears in the generated wire code with a Wire bound.
     // That compile-time guarantee covers macro-generated slot keys/handle codecs too;
     // no owned field traversal or second Wire-implementation discovery is needed.
     let mut clones = std::collections::HashSet::new();
@@ -790,44 +1048,75 @@ fn public_path(index: &Index<'_>, path: &str) -> bool {
     })
 }
 
-/// A hash of everything the two sides must agree on: every method's id and signature, and
-/// every type's shape (FNV-1a over their descriptions). This is the core seed;
-/// `generate` appends owned Wire layouts and the prepared marker/entry ABI layouts
-/// to the final WIRE_LAYOUT. wire_core_layout also supports refusal diagnostics:
-/// a guest presenting it without the prepared component is refused, never accepted.
-fn layout(surface: &Surface<'_>) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    let mut feed = |text: &str| {
-        for byte in text.bytes() {
-            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-        }
-    };
-    // Resource-control values are part of the interface even though they do not
-    // appear in a catalog signature. Older guests may have allocated identity zero.
-    feed(
-        "resource generation zero reserved; Any identity zero is Unsupported/cross-group capability",
-    );
-    // The group's mods share one handler table, which lives in a word of the std member.
-    feed(
-        "group state: 32 words in the std member's sunrise_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator",
-    );
-    feed("static replies: bounded acknowledged ids or uncached text");
-    feed("ConfigFiles imports: u8 root selector, 0 config, 1 data, 2 world; other values refused");
-    feed("Hooks::subscribed: Vec<(hook name, i32 priority, bool receive_cancelled)>");
-    for method in &surface.methods {
-        feed(&format!("{method:?}"));
-    }
-    for def in &surface.types.defs {
-        // Private borrowed descriptors also define bytes and checked writeback policy.
-        // Hash the complete definition so private writeback contracts affect compatibility.
-        feed(&format!("{def:?}"));
-    }
-    feed(&format!("{:?}", surface.hooks));
-    hash
-}
-
 #[cfg(test)]
 mod tests {
+    /// Every method that crosses gets a name, and no two share one: the table the guest imports
+    /// from and the game serves is the real API's, computed from its source.
+    #[test]
+    #[ignore = "daily"]
+    fn every_crossing_method_has_one_distinct_call_name() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut with_providers = included.to_vec();
+                with_providers.push(("capability_providers_generated.rs", providers.as_str()));
+                let mut surface = super::surface(&root, &with_providers).unwrap();
+                let hooks = crate::Catalog::load(&root).unwrap().hooks;
+                let names = super::call_names(&mut surface, &hooks, &[]).unwrap();
+                assert_eq!(names.by_method.len(), surface.methods.len());
+                let texts: std::collections::BTreeSet<String> =
+                    names.by_method.values().map(|n| n.text()).collect();
+                assert_eq!(texts.len(), surface.methods.len());
+                for text in &texts {
+                    assert!(mod_surface::call::Name::parse(text).is_ok(), "{text}");
+                }
+                eprintln!(
+                    "{} names, longest {}",
+                    texts.len(),
+                    texts.iter().map(String::len).max().unwrap()
+                );
+                // A method added to (here: removed from) an owner moves no other call's name,
+                // not even its neighbours in the same trait.
+                let mut count: std::collections::HashMap<&str, usize> = Default::default();
+                for method in &surface.methods {
+                    *count.entry(method.owner).or_default() += 1;
+                }
+                let owner = count.iter().max_by_key(|(_, n)| **n).unwrap().0.to_owned();
+                let at = surface
+                    .methods
+                    .iter()
+                    .position(|m| m.owner == owner)
+                    .unwrap();
+                let gone = surface.methods.remove(at);
+                let fewer = super::call_names(&mut surface, &hooks, &[]).unwrap();
+                assert_eq!(fewer.by_method.len() + 1, names.by_method.len());
+                for (key, name) in &fewer.by_method {
+                    assert_eq!(
+                        name.text(),
+                        names.by_method[key].text(),
+                        "removing {}::{} moved {}::{}",
+                        gone.owner,
+                        gone.name,
+                        key.0,
+                        key.1
+                    );
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// The generated impls depend on the hand-written `Wire` impls the generator skips, so an
     /// edit to that file must rerun the build script.
     #[test]
@@ -999,76 +1288,70 @@ mod tests {
             .join()
             .unwrap();
     }
+    /// The rules the boundary applies to a borrowed type, which no declaration shows, are in the
+    /// text every call that carries it hashes.
     #[test]
     #[ignore = "daily"]
-    fn layout_includes_private_borrowed_shapes() {
-        let run = || {
-            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
-            let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
-            let included = [
-                ("mod_api_generated.rs", generated.hooks.as_str()),
-                ("mod_api_generated_host.rs", generated.host.as_str()),
-                ("mod_api_host_areas.rs", generated.areas.as_str()),
-                ("capability_providers_generated.rs", providers.as_str()),
-            ];
-            let mut surface = super::surface(&root, &included).unwrap();
-            let baseline = super::layout(&surface);
-            assert!(
-                surface
+    fn private_borrowed_rules_are_part_of_a_calls_description() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                    ("capability_providers_generated.rs", providers.as_str()),
+                ];
+                let mut surface = super::surface(&root, &included).unwrap();
+                let describe = |surface: &super::Surface<'_>, def: usize| {
+                    super::descriptors::text(&surface.types, &[&super::ty::Ty::Named(def)])
+                };
+                let append = surface
                     .types
                     .defs
                     .iter()
-                    .filter(|def| def.lifetimes == 0)
-                    .all(|def| matches!(def.borrowed, super::ty::BorrowedShape::None)),
-                "owned fields must not be classified by the call generator"
-            );
-            let append = surface
-                .types
-                .defs
-                .iter()
-                .position(|d| d.append.is_some())
-                .unwrap();
-            assert!(matches!(
-                surface.types.defs[append].borrowed,
-                super::ty::BorrowedShape::None
-            ));
-            surface.types.defs[append].append.as_mut().unwrap().field += 1;
-            assert_ne!(baseline, super::layout(&surface));
-            surface.types.defs[append].append.as_mut().unwrap().field -= 1;
-            let projection = surface
-                .types
-                .defs
-                .iter_mut()
-                .find(|d| d.projection.is_some())
-                .unwrap();
-            assert!(matches!(
-                projection.borrowed,
-                super::ty::BorrowedShape::None
-            ));
-            projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
-            assert_ne!(baseline, super::layout(&surface));
-            let before_borrowed = super::layout(&surface);
-            let borrowed = surface
-                .types
-                .defs
-                .iter_mut()
-                .find_map(|def| {
-                    if def.lifetimes == 0 {
-                        return None;
+                    .position(|d| d.append.is_some())
+                    .unwrap();
+                let projection = surface
+                    .types
+                    .defs
+                    .iter()
+                    .position(|d| d.projection.is_some())
+                    .unwrap();
+                let borrowed = surface
+                    .types
+                    .defs
+                    .iter()
+                    .position(|d| {
+                        d.lifetimes != 0
+                            && matches!(d.borrowed, super::ty::BorrowedShape::Record(_))
+                    })
+                    .unwrap();
+                for def in [append, projection, borrowed] {
+                    let before = describe(&surface, def);
+                    assert!(!before.is_empty());
+                    match def {
+                        d if d == append => {
+                            surface.types.defs[d].append.as_mut().unwrap().field += 1
+                        }
+                        d if d == projection => {
+                            surface.types.defs[d].projection.as_mut().unwrap()[0].ty =
+                                super::ty::Ty::Unit
+                        }
+                        d => {
+                            if let super::ty::BorrowedShape::Record(fields) =
+                                &mut surface.types.defs[d].borrowed
+                            {
+                                fields[0].ty = super::ty::Ty::Unit;
+                            }
+                        }
                     }
-                    match &mut def.borrowed {
-                        super::ty::BorrowedShape::Record(fields) => fields.first_mut(),
-                        _ => None,
-                    }
-                })
-                .expect("a borrowed call record");
-            borrowed.ty = super::ty::Ty::Unit;
-            assert_ne!(before_borrowed, super::layout(&surface));
-        };
-        std::thread::Builder::new()
-            .stack_size(64 << 20)
-            .spawn(run)
+                    assert_ne!(before, describe(&surface, def));
+                }
+            })
             .unwrap()
             .join()
             .unwrap();

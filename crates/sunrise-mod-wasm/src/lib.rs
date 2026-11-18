@@ -10,6 +10,7 @@ mod compile_child;
 pub mod copy_probe;
 #[cfg(feature = "runtime-fixture")]
 pub mod fixture;
+mod imports;
 pub mod link;
 mod load_times;
 mod module_cache;
@@ -33,6 +34,7 @@ use runtime::take_refusal as wasm_call_refusal;
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+pub use imports::{Mismatch, Why, set_game_build};
 pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
@@ -100,10 +102,13 @@ pub enum Refusal {
         budget: compile_budget::CompileBudget,
         why: String,
     },
-    /// The mod was compiled against another generated boundary.
-    Layout { built: u64, game: u64 },
-    /// The mod's generated point records differ from this game's.
-    PointLayout { built: u64, game: u64 },
+    /// The mod uses items of the game's API that this game does not have as the mod was built.
+    /// Every mismatch is kept (the log lists them all); the text a player reads names the first
+    /// few and counts the rest. `build` is the game's build id, whose SDK the mod is rebuilt with.
+    Boundary {
+        mismatches: Vec<imports::Mismatch>,
+        build: Option<String>,
+    },
     /// The game has no shared Rust standard library beside its executable.
     NoStd,
     /// The group's mods declare more memory (`wasm_memory_mib`) than this instance's cap.
@@ -152,15 +157,23 @@ impl std::fmt::Display for Refusal {
                 f,
                 "{member}: cannot enforce compilation budget {budget}: {why}; restore a private writable .sunrise-cache/wasm directory and a working compiler executable"
             ),
-            Self::Layout { .. } => write!(
-                f,
-                "built for another version of the mod API (including the prepared can_equip ABI)"
-            ),
-            Self::PointLayout { built, game } => {
-                write!(
-                    f,
-                    "built for another version of the mod points API (mod layout {built}, game layout {game})"
-                )
+            Self::Boundary { mismatches, build } => {
+                write!(f, "built for an older Sunrise")?;
+                if let Some(build) = build {
+                    write!(f, ", rebuild with SDK sdk-{build}")?;
+                }
+                write!(f, ": uses ")?;
+                for (i, mismatch) in mismatches.iter().take(imports::LISTED).enumerate() {
+                    if i > 0 {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "{mismatch}")?;
+                }
+                let omitted = mismatches.len().saturating_sub(imports::LISTED);
+                if omitted > 0 {
+                    write!(f, "; and {omitted} more")?;
+                }
+                write!(f, " (or a type it carries changed)")
             }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
             Self::Memory {
@@ -419,6 +432,13 @@ static INITIALIZED_REFUSALS: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
 fn report_refusals(refused: &[(String, Refusal)], stdout: &mut impl std::io::Write) {
     for (id, why) in refused {
         log::warn!("wasm mod {id} refused: {why}");
+        if let Refusal::Boundary { mismatches, .. } = why
+            && mismatches.len() > imports::LISTED
+        {
+            for mismatch in mismatches {
+                log::warn!("wasm mod {id}: {mismatch}");
+            }
+        }
         let _ = writeln!(stdout, "wasm mod {id} refused: {why}");
     }
 }
@@ -723,11 +743,31 @@ fn load_with_cache(
     memory_cap_mib: u32,
     side: sunrise_mod_package::manifest::Side,
 ) -> Loaded {
+    // Each mod's imports are checked on their own, before any group forms: a mod whose items
+    // are gone is refused by name, and no mod that merely shares a library with it is.
+    let mut import_refused = Vec::new();
+    let packages: Vec<WasmPackage> = packages
+        .into_iter()
+        .filter(|package| {
+            let member = link::Member {
+                name: &package.manifest.id,
+                module: &package.module,
+            };
+            match imports::check(&[member]) {
+                Ok(()) => true,
+                Err(why) => {
+                    import_refused.push((package.manifest.id.clone(), why));
+                    false
+                }
+            }
+        })
+        .collect();
     let (groups, refused) = groups(&packages, side);
     let mut loaded = Loaded {
         refused,
         ..Loaded::default()
     };
+    loaded.refused.extend(import_refused);
     let engine = match runtime::engine() {
         Ok(engine) => engine,
         Err(error) => {
@@ -839,21 +879,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn point_layout_refusal_reports_both_layouts_to_console() {
+    fn a_boundary_refusal_names_each_item_with_its_versions_and_counts_the_rest() {
+        let mismatch = |item: &str, why| Mismatch {
+            item: item.into(),
+            why,
+        };
         let mut console = Vec::new();
         report_refusals(
             &[(
-                "layout_mod".into(),
-                Refusal::PointLayout {
-                    built: 123,
-                    game: 456,
+                "old_mod".into(),
+                Refusal::Boundary {
+                    mismatches: vec![
+                        mismatch(
+                            "host:ServerHost::give_item",
+                            Why::Changed {
+                                built: None,
+                                game: None,
+                                built_hash: "0123456789abcdef".into(),
+                                game_hash: "fedcba9876543210".into(),
+                            },
+                        ),
+                        mismatch(
+                            "hook:Hooks::block_click@3",
+                            Why::Changed {
+                                built: Some(2),
+                                game: Some(3),
+                                built_hash: "aaaaaaaaaaaaaaaa".into(),
+                                game_hash: "bbbbbbbbbbbbbbbb".into(),
+                            },
+                        ),
+                        mismatch("host:Players::kick", Why::Missing),
+                    ],
+                    build: Some("abc123".into()),
                 },
             )],
             &mut console,
         );
         assert_eq!(
             String::from_utf8(console).unwrap(),
-            "wasm mod layout_mod refused: built for another version of the mod points API (mod layout 123, game layout 456)\n"
+            "wasm mod old_mod refused: built for an older Sunrise, rebuild with SDK sdk-abc123: uses host:ServerHost::give_item changed (mod #01234567, game #fedcba98); hook:Hooks::block_click@3 changed (version 2 → 3); host:Players::kick is not in this game (or a type it carries changed)\n"
         );
     }
 
@@ -917,12 +981,13 @@ mod tests {
         let root = std::path::PathBuf::from(root);
         let path = root.join("duplicate_dev");
         std::fs::create_dir(&path).unwrap();
-        let module = wat::parse_str(
+        let module = wat::parse_str(format!(
             r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout"))
+                {log}
                 (func (export "sunrise_in"))
                 (func (export "sunrise_hook")))"#,
-        )
+            log = crate::imports::fixtures::log_import()
+        ))
         .unwrap();
         std::fs::write(path.join("mod.wasm"), &module).unwrap();
         std::fs::write(
@@ -1000,12 +1065,12 @@ mod tests {
                 r#"(module
                 (@custom "dylink.0" "\01\04\00\00\00\00")
                 (import "env" "memory" (memory 1))
-                (func (export "sunrise_layout") (result i64) i64.const {})
+                {log}
                 (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-                (func (export "sunrise_hook") (param i32) (result i64) {stores} i64.const {})
+                (func (export "sunrise_hook") (param i64) (result i64) {stores} i64.const {reply})
             )"#,
-                *mod_api::wire::LAYOUT,
-                (1024u64 << 32) | subscriptions.bytes().len() as u64
+                log = crate::imports::fixtures::log_import(),
+                reply = (1024u64 << 32) | subscriptions.bytes().len() as u64
             ))
             .unwrap();
             let loaded = load(&std, vec![package]);
@@ -1037,10 +1102,115 @@ mod tests {
         }
     }
 
+    /// A guest module that links the shared protocol and nothing else, plus `import`.
+    fn guest(import: &str) -> Vec<u8> {
+        wat::parse_str(format!(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (import "sunrise" "{}" (func (param i32 i32 i32 i32) (result i32)))
+            {import}
+            (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
+            (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+            mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+        ))
+        .unwrap()
+    }
+
     fn declaring(id: &str, sha: char, memory_mib: Option<u32>) -> WasmPackage {
         let mut package = package(id, "1.0.0", "", sha, "t", "");
         package.manifest.wasm_memory_mib = memory_mib;
         package
+    }
+
+    #[test]
+    fn a_mod_whose_imports_are_gone_is_refused_alone_by_name() {
+        let module = |import: &str| {
+            wat::parse_str(format!(
+                r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (import "env" "memory" (memory 1))
+                (import "sunrise" "{}" (func (param i32 i32 i32 i32) (result i32)))
+                {import}
+                (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
+                (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+                mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+            ))
+            .unwrap()
+        };
+        let mut good = package("good", "1.0.0", "", 'a', "t", "");
+        good.module = module("");
+        let mut bad = package("bad", "1.0.0", "", 'b', "t", "");
+        bad.module = module(
+            r#"(import "sunrise" "hook:Hooks::removed_long_ago@1#00112233445566778899aabbccddeeff" (func))"#,
+        );
+        let loaded = load_available_std(
+            Some(&[]),
+            vec![good, bad],
+            None,
+            sunrise_mod_package::manifest::MAX_WASM_MEMORY_MIB,
+            sunrise_mod_package::manifest::Side::Both,
+        );
+        let boundary: Vec<_> = loaded
+            .refused
+            .iter()
+            .filter(|(_, why)| matches!(why, Refusal::Boundary { .. }))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(boundary, ["bad"], "{:?}", loaded.refused);
+    }
+
+    #[test]
+    fn a_refused_member_leaves_its_library_and_good_sibling_to_form_a_group() {
+        let module = guest;
+        let removed = r#"(import "sunrise" "hook:Hooks::removed_long_ago@1#00112233445566778899aabbccddeeff" (func))"#;
+        let mut library = package("shared", "1.0.0", "", 'a', "t", "");
+        let mut sibling = package("sibling", "1.0.0", "shared = \"^1\"\n", 'b', "t", "");
+        let mut bad = package("bad", "1.0.0", "shared = \"^1\"\n", 'c', "t", "");
+        let mut needs_bad = package("needs_bad", "1.0.0", "bad = \"^1\"\n", 'd', "t", "");
+        library.module = module("");
+        sibling.module = module("");
+        bad.module = module(removed);
+        needs_bad.module = module("");
+        let loaded = load_available_std(
+            Some(&[]),
+            vec![library, sibling, bad, needs_bad],
+            None,
+            sunrise_mod_package::manifest::MAX_WASM_MEMORY_MIB,
+            sunrise_mod_package::manifest::Side::Both,
+        );
+        let why = |id: &str| {
+            loaded
+                .refused
+                .iter()
+                .find(|(name, _)| name == id)
+                .map(|(_, why)| why)
+        };
+        assert!(
+            matches!(why("bad"), Some(Refusal::Boundary { .. })),
+            "{:?}",
+            loaded.refused
+        );
+        assert!(
+            matches!(
+                why("needs_bad"),
+                Some(Refusal::DependencyRefused { .. } | Refusal::MissingDependency { .. })
+            ),
+            "{:?}",
+            loaded.refused
+        );
+        for survivor in ["shared", "sibling"] {
+            assert!(
+                !matches!(
+                    why(survivor),
+                    Some(
+                        Refusal::Boundary { .. }
+                            | Refusal::DependencyRefused { .. }
+                            | Refusal::MissingDependency { .. }
+                    )
+                ),
+                "{survivor}: {:?}",
+                loaded.refused
+            );
+        }
     }
 
     #[test]
@@ -1062,12 +1232,13 @@ mod tests {
 
     #[test]
     fn a_declared_need_above_the_instance_cap_refuses_the_group_at_load_by_name() {
+        let mut library = declaring("big_lib", 'a', Some(2048));
+        let mut addon = package("addon", "1.0.0", "big_lib = \"1\"\n", 'b', "t", "");
+        library.module = guest("");
+        addon.module = guest("");
         let loaded = load_with_cache(
             b"",
-            vec![
-                declaring("big_lib", 'a', Some(2048)),
-                package("addon", "1.0.0", "big_lib = \"1\"\n", 'b', "t", ""),
-            ],
+            vec![library, addon],
             None,
             1024,
             sunrise_mod_package::manifest::Side::Both,
@@ -1098,14 +1269,14 @@ mod tests {
         let packages = vec![
             package("b", "1.0.0", "lib = \"^1\"", 'b', "t", ""),
             package("lib", "1.2.0", "", 'a', "t", ""),
-            package("c", "1.0.0", "lib = \"^1\"", 'c', "t", ""),
+            package("e", "1.0.0", "lib = \"^1\"", 'c', "t", ""),
             package("alone", "1.0.0", "", 'd', "t", ""),
         ];
         let (groups, refused) = groups(&packages, sunrise_mod_package::manifest::Side::Both);
         assert!(refused.is_empty());
         assert_eq!(
             ids(&packages, &groups),
-            [vec!["lib", "b", "c"], vec!["alone"]]
+            [vec!["lib", "b", "e"], vec!["alone"]]
         );
     }
 
@@ -1161,7 +1332,7 @@ mod tests {
             package("lib", "2.0.0", "", 'a', "t", ""),
             package("b", "1.0.0", "missing = \"^1\"", 'b', "t", ""),
             package(
-                "c",
+                "e",
                 "1.0.0",
                 "b = \"^1\"\nextra = { version = \"^1\", optional = true }",
                 'c',
@@ -1182,7 +1353,7 @@ mod tests {
                     }
                 ),
                 (
-                    "c".to_string(),
+                    "e".to_string(),
                     Refusal::DependencyRefused {
                         dependency: "b".into()
                     }
@@ -1232,7 +1403,7 @@ mod tests {
         let packages = vec![
             package("lib", "1.0.0", "", 'a', "t", ""),
             package("b", "1.0.0", "lib = \"^1\"", 'b', "t", &linked),
-            package("c", "1.0.0", "lib = \"^1\"", 'c', "other", ""),
+            package("e", "1.0.0", "lib = \"^1\"", 'c', "other", ""),
         ];
         let (_, refused) = groups(&packages, sunrise_mod_package::manifest::Side::Both);
         assert_eq!(
@@ -1245,7 +1416,7 @@ mod tests {
                     }
                 ),
                 (
-                    "c".to_string(),
+                    "e".to_string(),
                     Refusal::Toolchain {
                         found: "other".into(),
                         group: "t".into()
@@ -1302,7 +1473,7 @@ mod mixed_install_tests {
         std::fs::write(library.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
         std::fs::write(
             addon.join("layouts.json"),
-            br#"{"lib":{"T":"0123456789abcdef"}}"#,
+            br#"{"lib":{"T":"0123456789abcdef0123456789abcdef"}}"#,
         )
         .unwrap();
         std::fs::write(
@@ -1337,14 +1508,14 @@ mod mixed_install_tests {
     #[test]
     fn wasm_to_native_layout_mismatch_names_the_type() {
         assert_eq!(
-            refusal("1123456789abcdef"),
+            refusal("1123456789abcdef0123456789abcdef"),
             "addon: layout mismatch in library lib for type T"
         );
     }
     #[test]
     fn wasm_to_native_matching_layout_is_still_unsupported() {
         assert_eq!(
-            refusal("0123456789abcdef"),
+            refusal("0123456789abcdef0123456789abcdef"),
             "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
         );
     }
@@ -1353,11 +1524,16 @@ mod mixed_install_tests {
 /// Resolve generated boundary operations for hand-written guest integration fixtures.
 #[cfg(feature = "listener-fixture")]
 pub fn fixture_import_id(owner: &str, method: &str) -> Option<u32> {
-    boundary::import_id(owner, method)
+    boundary::import_index(owner, method)
+}
+/// The id the game asks a guest for its hook subscriptions by.
+#[cfg(feature = "listener-fixture")]
+pub fn fixture_subscribed_id() -> u64 {
+    boundary::SUBSCRIBED
 }
 /// Resolve generated hook operations for hand-written guest integration fixtures.
 #[cfg(feature = "listener-fixture")]
-pub fn fixture_export_id(owner: &str, method: &str) -> Option<u32> {
+pub fn fixture_export_id(owner: &str, method: &str) -> Option<u64> {
     boundary::export_id(owner, method)
 }
 

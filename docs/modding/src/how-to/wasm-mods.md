@@ -41,11 +41,11 @@ For a value with checked construction, `#[wire(via = SomeOwnedType)]` uses
 refuses the value rather than constructing unchecked state. This also lets a type
 retain a deliberately chosen encoding instead of exposing its Rust fields.
 
-The loader compares composed encoding layouts, including nested fields and
-recursive shapes. Equivalent standard representations share one encoding:
-`Vec<T>` and `Box<[T]>`, for example, are both lists, while `Box<T>` is transparent.
-Changing a field's encoded form changes its callers' layout too. Layouts are
-computed once at load; they are not per-tick work.
+A type's wire shape is computed from its declared fields, nested and recursive types included.
+Equivalent standard representations share one shape: `Vec<T>` and `Box<[T]>`, for example, are both
+lists, while `Box<T>` is transparent. A change to a field's encoded form changes the name of every
+call that carries the type, so the loader refuses a built mod that uses one. Shapes are computed by
+the game's build, never at load.
 
 ## Build
 
@@ -147,36 +147,60 @@ but are not published as library definitions. This is symbol visibility metadata
 glue or another Rust interface.
 
 Pointers and lengths below are wasm32 `u32` values. The game provides these imports in the
-`sunrise` module:
+`sunrise` module. Every import is a named item of the game's API, and its name is its whole
+identity:
 
-- `host(id, in_ptr, in_len, out_ptr, out_cap) -> u32` invokes a generated import ID. Arguments
-  are Wire values in order. It writes the reply if it fits and returns its length; if the length
-  exceeds `out_cap`, call `host_reply(out_ptr)` after allocating that many bytes to copy the
-  retained reply. Host errors trap the call.
-- `host_reply(out_ptr)` copies that retained reply.
+```
+call:<Owner>::<method>#<hash>          a host call the mod makes
+hook:<Owner>::<method>@<version>#<hash>   a hook the mod implements (a marker; nothing runs)
+part:<Owner>::<method>#<hash>          a Part or handler method the mod implements (a marker)
+point:Points::<place>#<hash>           an injection point the mod listens at (a marker)
+protocol:{host_reply,release,log}#<hash>   the shared protocol, linked by every built mod
+```
+
+A host call has the signature `(in_ptr, in_len, out_ptr, out_cap) -> u32`: its arguments are
+Wire values in order, it writes the reply if it fits and returns its length, and if the length
+exceeds `out_cap` the guest allocates that many bytes and calls `protocol:host_reply(out_ptr)` to
+copy the retained reply. Host errors trap the call. `protocol:release(…)` lets go of an object the
+guest held, and `protocol:log(…)` sends the game a panic's text with no reply. A marker import has
+no parameters.
+
+The `<hash>` is the first 128 bits of the SHA-256 of a canonical description of the item: its
+owner, receiver, parameter and answer shapes, and the shape of every type they carry, field by
+field (`mod_surface::call`; the description is in the `sunrise-mod-surface` crate docs). A type's
+path never enters it. A hook's `@<version>` is its `hook_version`, which a refusal reports as
+"version 2 → 3".
+
+**Compatibility.** A built wasm mod loads on a newer game build as long as every item it names is
+unchanged. Each host call, hook, Part method and point is hashed on its own: the hash covers that
+item's signature and the shapes of the types it carries, so adding a method refuses nothing. A mod is refused, by name, when an item it uses changed or is gone
+("or a type it carries changed"). The refusal reads "built for an older Sunrise, rebuild with SDK
+`sdk-<build id>`", with the first eight mismatched items and the count of the rest; the log lists
+them all. A hook hands a mod `&mut dyn ServerHost`, whose vtable keeps every host method, so a built mod
+imports every host call whether it calls it or not: changing or removing any host call refuses every
+built wasm mod (a new method refuses none), while a changed hook, Part method or point refuses only
+the mods that implement it (a point's hash covers its own signature, not every type reachable from it). One exception: the shared resource codec keeps one Part marker (`part:BlockCapabilityProvider<dyn ItemStorage>::provide`), so a mod that implements no Part still imports it, and a game build that changes that one method refuses it (#2517). Rebuilding against this SDK moves a mod's numbered imports to these names with no source edit: a mod that uses the derive needs only a rebuild, while one that decodes an `EntityWrite` or `InsideEffects` by hand needs a source change to match the derive's bytes. Known gap: a behaviour change under an unchanged signature is not caught; the hook's
+`hook_version` is how the game says one happened.
 
 Each guest exports:
 
-- `sunrise_layout() -> u64`: the generated layout hash. A mismatch is refused.
-- `sunrise_layout_ext() -> u64`, when `mod_points` is linked: the full point catalog's layout
-  hash. The loader checks it before accepting any listener.
 - `sunrise_in(len) -> ptr`: the buffer into which the game writes the next call's input.
-- `sunrise_hook(id) -> u64`: runs the generated export ID after the input is written. The high
-  32 bits are the reply pointer and the low 32 bits its length; `u32::MAX` as the length denotes
-  an error, with a Wire string at the pointer. The reply remains valid until the next call at
-  the same depth. A handler call starts its input with the handler's `u64` ID.
+- `sunrise_hook(id: u64) -> u64`: runs the export whose id is the 63-bit digest of its name text
+  (a point's id also carries bit 63) after the input is written. The high 32 bits of the answer
+  are the reply pointer and the low 32 bits its length; `u32::MAX` as the length denotes an error,
+  with a Wire string at the pointer. The reply remains valid until the next call at the same
+  depth. A handler call starts its input with the handler's `u64` ID.
 
-The reserved IDs are `INIT = 0xFFFF_FF00` (guest package-list initialization),
-`RELEASE = 0xFFFF_FF01` (guest handler IDs to release), and `HOST_RELEASE = 0xFFFF_FF02`
-(host object ID to release), and `HOST_LOG = 0xFFFF_FF03` (a guest panic string, with no reply).
-Other IDs index the generated import or export table. A hook reply
-contains its return value followed by writable arguments in field order.
+The reserved ids, all below `RESERVED_IDS` (`0x1_0000`), are `INIT = 0xFFFF_FF00` (guest
+package-list initialization) and `RELEASE = 0xFFFF_FF01` (guest handler IDs to release). A hook
+reply contains its return value followed by writable arguments in field order.
 
-Points use that same hook export, call arena and execution budget. Place IDs are
-`0x8000_0000 + place`. The subscription query `0xBFFF_FFFF` returns `(place, injection_id)`
-pairs. Point call input starts with the `u32` subscription index. A `HostSide` point then carries
-a server/client boolean, followed by its listener record. Calls reply with unit and the record,
-which the host decodes completely before writing any field back.
+Points use that same hook export, call arena and execution budget. The id of a point's place is
+its name's digest with bit 63 set, and `SUBSCRIPTIONS` (bit 63 and the low 32 bits set) asks which
+places the guest listens at, answered as `(place name, injection id)` pairs. Point call input
+starts with the `u32` subscription index. A `HostSide` point then carries a server/client boolean,
+followed by its listener record. Calls reply with unit and the record, which the host decodes
+completely before writing any field back.
 
 Wire values use little-endian numbers; lengths and collection counts are `u32`, strings are a
 byte length followed by UTF-8 bytes, options have a byte tag (`0` or `1`), enums have a `u32`
@@ -189,8 +213,8 @@ strings per process. Execution, memory and table limits are enforced separately 
 ## In the game
 
 Each dependency group uses shared memory and one copy of the standard library; its members are
-core wasm shared modules, not components. A layout mismatch or an unresolved dependency is refused
-and named on the Mods page.
+core wasm shared modules, not components. A changed item the mod uses, or an unresolved
+dependency, is refused and named on the Mods page.
 
 The game limits execution time, memory and table usage. A trap or limit hit disables the affected
 group. APIs marked `Not on wasm` in their Rust documentation cannot be used by wasm mods.

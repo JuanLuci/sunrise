@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Näkymä",
   "sunrise.studio.topbar.view_short": "Näkymä",
   "sunrise.studio.unknown_server": "Tuntematon",
-  "sunrise.tempban.dedicated_required": "Tilapäiset bannit vaativat dedikoidun palvelimen",
-  "sunrise.tempban.invalid_duration": "%s ei ole kesto: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Tilapäisiä banneja on %s:",
-  "sunrise.tempban.list.empty": "Tilapäisiä banneja ei ole",
-  "sunrise.tempban.list.entry": "%2$s bännäsi käyttäjän %1$s %3$s (kunnes %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s ajaksi, kunnes %3$s",
-  "sunrise.tempban.usage": "/tempban <pelaaja> <kesto> [syy]",
   "sunrise.title.not_affiliated": "Ei sidoksissa Mojangiin tai Microsoftiin"
 }

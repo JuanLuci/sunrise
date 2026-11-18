@@ -9,9 +9,7 @@
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A resource's id: generation in the high half, slot in the low.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Id(pub u64);
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field

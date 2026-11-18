@@ -27,9 +27,11 @@
     "sunrise-client-core": "engine",
     "sunrise-client-input": "engine",
     "sunrise-client-lib": "engine",
+    "sunrise-client-gameplay": "engine",
     "sunrise-client-render": "engine",
     "sunrise-command": "engine",
     "sunrise-core": "engine",
+    "sunrise-gameplay": "engine",
     "sunrise-items": "engine",
     "sunrise-narrator": "engine",
     "sunrise-perf-format": "engine",
@@ -135,6 +137,10 @@
       "sunrise-guest-stack",
       "sunrise-java-properties"
     ],
+    "pending": {
+      "_doc": "Engine crates that still take a non-portable crate, until the types they need move down. Entries only go away.",
+      "sunrise-gameplay": ["sunrise-client-lib"]
+    },
     "forbidden": [
       "arboard",
       "cpal",

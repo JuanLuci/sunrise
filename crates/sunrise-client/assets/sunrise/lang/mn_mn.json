@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Харах",
   "sunrise.studio.topbar.view_short": "Харах",
   "sunrise.studio.unknown_server": "Тодорхойгүй",
-  "sunrise.tempban.dedicated_required": "Түр хугацааны хоригт зориулалтын сервер хэрэгтэй",
-  "sunrise.tempban.invalid_duration": "%s нь хугацаа биш: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s түр хугацааны хориг байна:",
-  "sunrise.tempban.list.empty": "Түр хугацааны хориг байхгүй",
-  "sunrise.tempban.list.entry": "%1$s-г %2$s %3$s хориглосон (%4$s хүртэл)",
-  "sunrise.tempban.success": "%1$s %2$s-ийн турш, %3$s хүртэл",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang эсвэл Microsoft-той холбоогүй"
 }

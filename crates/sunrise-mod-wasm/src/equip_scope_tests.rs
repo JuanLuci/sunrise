@@ -18,11 +18,7 @@ fn equip_scope_copies_once_per_instance_for_eight_candidates_and_two_parts() {
             (func (export "release_can_equip") (result i64) i64.const 0)
         "#
         );
-        let bytes = super::runtime_tests::guest_with_exports(
-            *mod_api::wire::LAYOUT,
-            "unreachable",
-            &exports,
-        );
+        let bytes = super::runtime_tests::guest_with_exports("unreachable", &exports);
         let engine = engine().unwrap();
         let make = || {
             WasmMod::instantiate(

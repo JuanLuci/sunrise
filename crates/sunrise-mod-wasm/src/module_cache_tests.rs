@@ -275,7 +275,6 @@ fn artifact_shipped_beside_package_is_ignored() {
     let bytes = wat::parse_str(
         r#"(module
         (@custom "dylink.0" "\01\04\00\00\00\00")
-        (func (export "sunrise_layout"))
         (func (export "sunrise_in"))
         (func (export "sunrise_hook"))
         (func (export "answer") (result i32) i32.const 42))"#,

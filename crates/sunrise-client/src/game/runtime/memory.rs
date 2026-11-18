@@ -4,6 +4,7 @@
 //! caches, the renderer's bookkeeping and the GPU allocator's resources by
 //! label say where it goes. `unattributed_mb` is what the named parts leave.
 use super::Game;
+use super::owner_link::{ControlRequest, OwnerRequest};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -256,7 +257,7 @@ struct Renderer {
 }
 
 /// A serving game's own parts: the columns it holds, its generation, entities, players, chunk send caches and queues.
-struct ServerSide {
+pub(super) struct ServerSide {
     columns: Columns,
     addresses: FxHashSet<usize>,
     generation: Generation,
@@ -511,7 +512,7 @@ impl Game<'_> {
     }
 
     /// This game's own server parts: it is a dedicated server, or the single-player server thread.
-    fn server_side(&self) -> ServerSide {
+    pub(super) fn server_side(&self) -> ServerSide {
         let (players, chunk_send) = match &self.lan {
             Some(host) => (player_census(&host.hub), chunk_send_census(&host.hub)),
             None => (Players::default(), ChunkSend::default()),
@@ -554,9 +555,9 @@ impl Game<'_> {
         let server = if dedicated {
             Some(self.server_side())
         } else {
-            self.integrated
-                .as_ref()
-                .and_then(|i| i.call(|g| g.server_side()))
+            self.integrated.as_ref().and_then(|i| {
+                i.ask(|reply| OwnerRequest::Control(ControlRequest::ServerSide(reply)))
+            })
         };
         let window = (!dedicated).then(|| self.level_census());
         // The window's sections the server thread holds too (lan/handoff.rs).

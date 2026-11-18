@@ -75,6 +75,8 @@ pub struct StateFacts {
     pub waterlogged: bool,
     /// `hasOffsetFunction`: the model is jittered per column.
     pub random_offset: bool,
+    /// Explicit load-time offset limits; absent for vanilla rows with class-derived defaults.
+    pub offset_limits: Option<(f32, f32)>,
     /// Whether the outline, not just the model, follows BlockState.getOffset.
     pub outline_offset: bool,
     /// `BlockState.isSolid()` (legacy solidity; fluid surfaces read it).
@@ -143,38 +145,30 @@ impl StateFacts {
     /// for XZ. None without an offset function.
     pub fn max_offset(&self) -> Option<(f32, f32)> {
         self.random_offset.then(|| {
-            let horizontal = if self.has_class("SpeleothemBlock") {
-                0.125
-            } else {
-                0.25
-            };
-            let vertical = match self.name.strip_prefix("minecraft:").unwrap_or(&self.name) {
-                "small_dripleaf" => 0.1,
-                "short_grass" | "fern" | "short_dry_grass" | "tall_dry_grass" => 0.2,
-                _ => 0.0,
-            };
-            (horizontal, vertical)
+            self.offset_limits.unwrap_or_else(|| {
+                inherited_offset_limits(&self.name, self.has_class("SpeleothemBlock"))
+            })
         })
     }
     /// `BlockState.getOffset(pos)`: the column's jitter, zero without an
     /// offset function.
     pub fn offset_at(&self, x: i32, z: i32) -> [f64; 3] {
-        self.max_offset()
-            .map_or([0.0; 3], |max| column_offset(max, x, z))
+        self.max_offset().map_or([0.0; 3], |max| {
+            sunrise_core::random::column_offset(max, x, z)
+        })
     }
 }
-/// The `OffsetType.XZ`/`XYZ` jitter of column (x, z) from `Mth.getSeed(x, 0, z)`,
-/// for a block with `max` = (max horizontal, max vertical) offset.
-pub fn column_offset((horizontal, vertical): (f32, f32), x: i32, z: i32) -> [f64; 3] {
-    let seed = sunrise_core::random::position_seed(sunrise_core::position::BlockPos::new(x, 0, z));
-    let nibble = |shift: u32| ((seed >> shift) & 15) as f32 / 15.0;
-    let h = f64::from(horizontal);
-    [
-        ((f64::from(nibble(0)) - 0.5) * 0.5).clamp(-h, h),
-        (f64::from(nibble(4)) - 1.0) * f64::from(vertical),
-        ((f64::from(nibble(8)) - 0.5) * 0.5).clamp(-h, h),
-    ]
+/// The prepared vanilla rows predate explicit offset limits; preserve their class defaults.
+pub fn inherited_offset_limits(name: &str, speleothem: bool) -> (f32, f32) {
+    let horizontal = if speleothem { 0.125 } else { 0.25 };
+    let vertical = match name.strip_prefix("minecraft:").unwrap_or(name) {
+        "small_dripleaf" => 0.1,
+        "short_grass" | "fern" | "short_dry_grass" | "tall_dry_grass" => 0.2,
+        _ => 0.0,
+    };
+    (horizontal, vertical)
 }
+
 impl StateFacts {
     /// A `SignBlock`'s form, by class: a mod's sign has its template's,
     /// whatever its name.
@@ -575,6 +569,7 @@ impl BlockFacts {
                 fluid_falling,
                 waterlogged: prop("waterlogged") == Some("true"),
                 random_offset: entry.offset,
+                offset_limits: entry.offset_limits.as_ref().map(|limits| limits.0),
                 outline_offset: entry.outline_offset.unwrap_or(entry.offset),
                 legacy_solid: behaviour_states[index][1].as_u64().unwrap_or(0) & 1 != 0,
                 sturdy_full: (behaviour_states[index][0].as_u64().unwrap_or(0) & 63) as u8,

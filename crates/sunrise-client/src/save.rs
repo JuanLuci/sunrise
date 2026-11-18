@@ -6739,8 +6739,17 @@ mod tests {
         let region = super::cached_region(&save.entity_regions, (0, 0), &path, true)
             .unwrap()
             .unwrap();
-        // Hold the actual region lock, rather than relying on disk speed or sleeps.
-        let blocked = region.lock().unwrap();
+        let chunk_region = super::cached_region(
+            &save.regions,
+            (0, 0),
+            &save.region_path("region", 0, 0),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        // Hold the actual region locks, rather than relying on disk speed or sleeps. The
+        // writer takes the Region folder before Entities in a pass, so both are held.
+        let blocked = (region.lock().unwrap(), chunk_region.lock().unwrap());
         let entity = |version| Tag::compound([("version", Tag::Int(version))]);
         save.save_entities_later(vec![((1, 2), vec![entity(1)])])
             .unwrap();

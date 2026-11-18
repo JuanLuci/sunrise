@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vaade",
   "sunrise.studio.topbar.view_short": "Vaade",
   "sunrise.studio.unknown_server": "Tundmatu",
-  "sunrise.tempban.dedicated_required": "Ajutised keelud nõuavad pühendatud serverit",
-  "sunrise.tempban.invalid_duration": "%s pole kestus: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Ajutisi keelde on %s:",
-  "sunrise.tempban.list.empty": "Ajutisi keelde pole",
-  "sunrise.tempban.list.entry": "%1$s keelas %2$s %3$s (kuni %4$s)",
-  "sunrise.tempban.success": "%1$s kestusega %2$s, kuni %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Ei ole seotud Mojangi ega Microsoftiga"
 }

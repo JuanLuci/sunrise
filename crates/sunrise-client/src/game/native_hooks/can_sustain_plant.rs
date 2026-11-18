@@ -15,7 +15,8 @@ impl GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_can_sustain_plant(dimension, state, ground, ground_pos, sustains);
+        self.fire_can_sustain_plant(dimension, state, ground, ground_pos, sustains, inert);
     }
 }

@@ -64,15 +64,6 @@ impl Game<'_> {
             }
             return;
         }
-        // Sunrise's `/tempban` (game/administration/tempban.rs), on dedicated servers.
-        if crate::game::tempban::TEMPBAN_COMMANDS.contains(&words[0]) && self.server_lists.is_some()
-        {
-            if let Some(mut host) = self.lan.take() {
-                self.guest_tempban_command(&mut host, conn, &words);
-                self.lan = Some(host);
-            }
-            return;
-        }
         // A native mod's command, for every player its level allows,
         // whether the world allows commands or not (game/modding/native_server.rs).
         let allowed = self.options.dedicated.is_some() || self.allow_commands();

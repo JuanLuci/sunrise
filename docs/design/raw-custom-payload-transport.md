@@ -42,8 +42,13 @@ Sunrise-branded peers, even with empty or all-optional mod registries. On `sunri
 then the manifest record count. The second byte is raw transport revision 1,
 independent of application versions. A wrong revision or an absent marked response
 from a Sunrise-branded peer refuses admission with a named raw-protocol cause.
-Servers send the Query before known packs so a compatible empty peer's Offer cannot
-be overtaken by that barrier. Non-Sunrise vanilla peers remain eligible for optional
+A server whose mods declare payloads sends the Query before known packs; otherwise it
+sends the Query only once the peer names itself Sunrise, so a vanilla client is sent
+nothing on `sunrise:payloads`. That Query, or the server's Offer to a client's own Query,
+follows the known-packs request, so if a Sunrise peer's Offer has not arrived by its
+known-packs reply, the server pings it there and reads on until the Offer or the pong: a
+pong with no Offer before it is the missing marked response. A vanilla peer is never
+pinged. Non-Sunrise vanilla peers remain eligible for optional
 admission; a brand is capability negotiation, not authentication of a build.
 
 A connection owns its negotiated table, protocol and incarnation epoch. Application

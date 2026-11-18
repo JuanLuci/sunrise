@@ -1590,6 +1590,9 @@ pub struct Mob {
     /// `Entity.isInPowderSnow` as of the last mob tick, for the skeleton's
     /// freezing tracker read at save time.
     pub in_powder_snow: bool,
+    /// `Entity.wasInPowderSnow`: `in_powder_snow` as the last tick left it,
+    /// kept by `Entity.baseTick` for `Mob.isSunBurnTick`.
+    pub was_in_powder_snow: bool,
     pub glowing: bool,
     pub air: i32,
     pub last_hurt: f32,
@@ -3640,6 +3643,7 @@ impl Mob {
             fire_ticks: 0,
             ticks_frozen: 0,
             in_powder_snow: false,
+            was_in_powder_snow: false,
             glowing: false,
             air: 300,
             last_hurt: 0.0,

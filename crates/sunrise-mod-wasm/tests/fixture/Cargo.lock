@@ -455,6 +455,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-point-shape",
+ "sunrise-mod-surface",
  "syn 2.0.119",
 ]
 

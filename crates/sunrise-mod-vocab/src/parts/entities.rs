@@ -225,7 +225,7 @@ pub trait EntitiesRegistrar {
 
     /// Record the state declaration of entity Part `part` on entity type `entity`, or refuse
     /// it (as the mod's registration refusal too): see `PartStateDeclaration::check`, a key
-    /// outside this mod's namespaces, or one it declared with another Wire layout. Mods reach
+    /// outside this mod's namespaces, or one it declared with another Rust type name. Mods reach
     /// it through `entity_part_with_state`.
     ///
     /// Not on wasm: entity parts and their state declarations are registered only by native mods.

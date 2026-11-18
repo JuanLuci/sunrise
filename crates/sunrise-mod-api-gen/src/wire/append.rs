@@ -279,7 +279,7 @@ mod tests {
                 ("mod_api_host_areas.rs", generated.areas.as_str()),
                 ("capability_providers_generated.rs", providers.as_str()),
             ];
-            let mut types = super::Types::new(crate::index::Index::new(&root, &included)).unwrap();
+            let mut types = super::Types::new(crate::index::game(&root, &included)).unwrap();
             let api = types.index.module("mod_api", &[]).unwrap();
             let super::Found::Item(id) = types.index.resolve(api, "ApplyEffectTickEvent").unwrap()
             else {

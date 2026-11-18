@@ -6,22 +6,21 @@ impl Recipes {
     /// keeps and the written book a clone keeps.
     pub fn remainders(
         &self,
+        context: &LoopContext,
         recipe: &str,
         grid: &[Option<ItemStack>],
         size: usize,
         remainder: &dyn Fn(&ItemStack) -> Option<ItemStack>,
     ) -> Vec<Option<ItemStack>> {
-        let mut out = vec![None; size * size];
         let kind = self
             .crafting
             .iter()
             .find(|(n, _)| n == recipe)
             .map(|(_, r)| r);
-        if let Some(Recipe::Mod(recipe)) = kind
-            && let Some(result) = recipe.remainders(grid, size)
-        {
-            return result;
+        if matches!(kind, Some(Recipe::Mod(_))) {
+            return self.mod_remainders_rect(context, recipe, grid, size, size, size, remainder);
         }
+        let mut out = vec![None; size * size];
         let Some(input) = Input::of(grid, size) else {
             return out;
         };

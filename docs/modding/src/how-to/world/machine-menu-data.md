@@ -256,8 +256,11 @@ refused open closes nothing.
 
 The menu the player had open closes on the server first, as a close does: its `removed`, one
 `player_container_close`, and the cursor stack and crafting grids back to the inventory. Then
-the new menu is built, its screen opened and its contents sent, and the next tick's
-`player_container_open` tells of it. `replace` is the Java `MenuProvider`'s choice
+the new menu is built, its screen opened and its contents sent, and `player_container_open`
+tells of it synchronously. Version 2 names the type string `menu_type` (also on
+`player_container_close`) and supplies `menu: Option<MenuRef>`, valid during the open callback,
+as `PlayerRef::container_menu` does. It is `None` for crafting tables, merchants, workstations,
+lecterns, mount inventories and hidden-slot menus. `replace` is the Java `MenuProvider`'s choice
 (`shouldTriggerClientSideContainerClosingOnOpen`), as for
 [`open_menu`](../../concepts/capabilities/menu-slots.md#a-mods-chest-menu):
 `MenuReplace::CloseFirst`, vanilla's default, first sends the client a close for the old

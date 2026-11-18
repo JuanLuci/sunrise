@@ -2,7 +2,9 @@
 """Run every library test, ignored or not, with the prepared vanilla data, against a list of known failures.
 
 Usage: ignored_tests.py SHARD...  (SUNRISE_TEST_RESOURCES points at the prepared 26.3 data)
-       ignored_tests.py --needs VARIABLE (--one-process-each | --list) [--jobs N]
+       ignored_tests.py --needs VARIABLE (--one-process-each | --list) [--jobs N] [--binaries FILE]
+       ignored_tests.py --build-tests FILE
+       ignored_tests.py --prebuilt FILE -p PACKAGE (--lib | --test NAME | --bin NAME)... [-- ARGUMENTS...]
 
 A SHARD is a package, or one leg of it written `PACKAGE#NofM` (tools/ci/ignored_shards.py splits the biggest
 package so one process does not hold every test's memory). A leg runs the tests whose name hashes to its
@@ -38,6 +40,10 @@ shard.
 `--needs VARIABLE --one-process-each` runs the tests marked `needs VARIABLE`, each alone in its own process
 (`--list` prints those commands instead), and fails unless every run reports exactly one test passed: a
 renamed test would otherwise match nothing and pass. Every test runs, then the step fails if any did.
+`--build-tests FILE` builds the root workspace's tests once with verify's command (WORKSPACE_TEST_BUILD) and writes
+their executables to FILE; `--needs ... --binaries FILE` then runs each test from its executable when that build made
+it, and `--prebuilt FILE -p PACKAGE TARGET... -- ARGUMENTS` runs those targets' executables as `cargo test` would,
+for a job's other tests (the wasm fixture job: one build with one feature resolution instead of one per command).
 `--daily-tests PACKAGE TARGET` prints the tests one target's daily rows list, one per line (the Windows daily job
 runs sunrise-mod-package's with `-- --ignored --exact`).
 `--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
@@ -338,14 +344,68 @@ def needs_commands(variable, jobs=None):
     return commands
 
 
+def write_built(path):
+    """--build-tests: the workspace's test executables (built_test_binaries) to `path`, `PACKAGE TARGET` -> path."""
+    binaries = built_test_binaries()
+    Path(path).write_text(json.dumps({f"{package} {target}": executable
+                                      for (package, target), executable in sorted(binaries.items())}, indent=1) + "\n")
+    return 0 if binaries else 1
+
+
+def read_built(path):
+    return {tuple(key.split(" ", 1)): executable for key, executable in json.loads(Path(path).read_text()).items()}
+
+
+def cargo_targets(arguments):
+    """(package, [target...], test arguments) of `-p PACKAGE --lib --test NAME --bin NAME ... -- ARGUMENTS`; other
+    cargo flags (`--features`, `--no-fail-fast`, `-jN`) say nothing about which executables run, so they are skipped."""
+    split = arguments.index("--") if "--" in arguments else len(arguments)
+    head, rest = arguments[:split], arguments[split + 1:]
+    package, targets, at = None, [], 0
+    while at < len(head):
+        if head[at] == "-p":
+            package, at = head[at + 1], at + 2
+        elif head[at] == "--lib":
+            targets, at = targets + ["lib"], at + 1
+        elif head[at] in ("--test", "--bin"):
+            targets, at = targets + [f"{head[at][2:]}:{head[at + 1]}"], at + 2
+        else:
+            at += 1 + (head[at] == "--features")
+    return package, targets, rest
+
+
+def run_prebuilt(path, arguments):
+    """--prebuilt: run `-p PACKAGE TARGET...`'s executables from the --build-tests file, printing their output as cargo
+    would (run_binaries); 101 when one failed or the build did not make it."""
+    package, targets, rest = cargo_targets(arguments)
+    built = read_built(path) if Path(path).is_file() else {}
+    missing = [target for target in targets if (package, target) not in built]
+    if not package or not targets or missing:
+        print(f"error: the workspace build made no test executable for {package} {' '.join(missing or ['(none named)'])}"
+              " (a compile error?)", flush=True)
+        return 101
+    done = run_binaries(package, {target: built[package, target] for target in targets}, rest, dict(os.environ))
+    print(done.stdout, end="", flush=True)
+    # A filter that matches nothing passes in libtest: a test renamed, or behind a feature the workspace build left
+    # off, would vanish and leave the step green.
+    ran = sum(int(found[1]) + int(found[2]) for found in re.finditer(r"^test result: \w+\. (\d+) passed; (\d+) failed;",
+                                                                       done.stdout, re.M))
+    if not ran:
+        print(f"error: no test of {package} {' '.join(targets)} ran with {shlex.join(rest) or '(no arguments)'}",
+              flush=True)
+        return 101
+    return done.returncode
+
+
 def write_report(path, report):
     """The daily summary's hand-off (--report): identities, locations and policy only."""
     if path:
         Path(path).write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
 
 
-def run_one_process_each(variable, jobs=None, report=None):
-    """Run each test that needs `variable` in its own process; 1 unless every run reports exactly one passed test."""
+def run_one_process_each(variable, jobs=None, report=None, binaries=None):
+    """Run each test that needs `variable` in its own process; 1 unless every run reports exactly one passed test.
+    With `binaries` (a --build-tests file), a test the workspace build made runs from its executable."""
     if not os.environ.get(variable):
         sys.exit(f"{variable} is unset: these tests need it")
     failed = []
@@ -353,13 +413,24 @@ def run_one_process_each(variable, jobs=None, report=None):
     for command in needs_commands(variable, jobs):
         # needs_commands ends each command with the test's exact name, after `-p PACKAGE`.
         entry = {"package": command[command.index("-p") + 1], "test": safe_identity(command[-1])}
-        print(f"$ {shlex.join(command)}", flush=True)
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-        passed = False
-        for line in process.stdout:
-            print(line, end="", flush=True)
-            passed |= line.startswith("test result: ok. 1 passed;")
-        if process.wait() or not passed:
+        package, targets, rest = cargo_targets(command[2:])
+        if binaries and all((package, target) in binaries for target in targets):
+            print(f"$ {shlex.join(command)}  (from the workspace build)", flush=True)
+            done = run_binaries(package, {target: binaries[package, target] for target in targets}, rest,
+                                dict(os.environ))
+            print(done.stdout, end="", flush=True)
+            code, lines = done.returncode, done.stdout.splitlines()
+        else:
+            print(f"$ {shlex.join(command)}", flush=True)
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                       errors="replace")
+            lines = []
+            for line in process.stdout:
+                print(line, end="", flush=True)
+                lines.append(line)
+            code = process.wait()
+        passed = any(line.startswith("test result: ok. 1 passed;") for line in lines)
+        if code or not passed:
             print(f"::error::expected 1 passing test from: {shlex.join(command)}", flush=True)
             failed.append(command)
             verdict["problems"].append({**entry, "kind": "failed", "panic": None, "policy": None})
@@ -1210,6 +1281,8 @@ def main(shards, report=None):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--prebuilt"]:
+        sys.exit(run_prebuilt(sys.argv[2], sys.argv[3:]))
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("shards", nargs="*", metavar="SHARD")
     parser.add_argument("--needs", metavar="VARIABLE", help="the tests marked `needs VARIABLE`")
@@ -1218,16 +1291,22 @@ if __name__ == "__main__":
     each.add_argument("--list", action="store_true", help="print their commands")
     parser.add_argument("--jobs", type=int, help="cargo's -j for --needs")
     parser.add_argument("--report", metavar="FILE", help="also write the verdict as JSON for the daily summary")
+    parser.add_argument("--binaries", metavar="FILE", help="with --needs, the executables --build-tests wrote")
+    parser.add_argument("--build-tests", metavar="FILE", help="build the workspace's tests once; their executables to FILE")
     parser.add_argument("--daily-tests", nargs=2, metavar=("PACKAGE", "TARGET"),
                         help="print the daily rows' tests of one package's target, one per line")
     args = parser.parse_args()
+    if args.build_tests:
+        sys.exit(write_built(args.build_tests))
     if args.daily_tests:
         # Nothing at all for no rows: an empty line would read as one empty name.
         sys.stdout.write("".join(f"{test}\n" for test in daily_tests(*args.daily_tests)))
     elif args.needs and args.list:
         print("\n".join(shlex.join(command) for command in needs_commands(args.needs, args.jobs)))
     elif args.needs and args.one_process_each:
-        sys.exit(run_one_process_each(args.needs, args.jobs, args.report))
+        sys.exit(run_one_process_each(args.needs, args.jobs, args.report,
+                                      read_built(args.binaries) if args.binaries and Path(args.binaries).is_file()
+                                      else None))
     elif args.needs or args.one_process_each or args.list:
         parser.error("--needs takes --one-process-each or --list, and they take --needs")
     else:

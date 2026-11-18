@@ -169,8 +169,10 @@ impl LivingAirWorld for MotionWorld<'_, '_, '_> {
     fn is_client_side(&mut self) -> Result<bool> {
         Ok(self.player.client_side)
     }
+    /// `Level.hasChunkAt`: a client's level always has one (`ClientLevel.hasChunk` is `true`; a
+    /// chunk that hasn't come is the empty chunk), so only a server's looks at its chunks.
     fn has_chunk_at(&mut self, p: BlockPos) -> Result<bool> {
-        Ok(self.scene.chunks.contains_key(&(p.x >> 4, p.z >> 4)))
+        Ok(self.player.client_side || self.scene.chunks.contains_key(&(p.x >> 4, p.z >> 4)))
     }
     fn effective_gravity(&mut self) -> Result<f64> {
         living_motion::effective_gravity(self)

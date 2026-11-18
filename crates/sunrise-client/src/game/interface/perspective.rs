@@ -115,7 +115,13 @@ impl RayWorld for VisualRays<'_, '_> {
             return Ok(VoxelShape::block());
         }
         if name == "minecraft:snow" || name.ends_with("_fence") {
-            return ray_shape_from_boxes(&facts.outline);
+            let shape = ray_shape_from_boxes(&facts.outline)?;
+            let offset = if facts.outline_offset {
+                facts.offset_at(p.x, p.z)
+            } else {
+                [0.0; 3]
+            };
+            return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
         }
         self.inner.block_shape(state, p, RayBlockMode::Collider)
     }

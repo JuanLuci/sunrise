@@ -77,6 +77,7 @@ impl Game<'_> {
                         &world_stations!(game).enchantments,
                         Some(&planning),
                         Some(&outcome),
+                        prepared.container_insert_rules().to_vec(),
                     );
                     host.hub.plan_click(&mut prepared, p, &rules);
                 }
@@ -148,6 +149,7 @@ impl Game<'_> {
                     None => Some(&*game),
                 },
                 answer,
+                click.container_insert_rules().to_vec(),
             );
             let outcome = host.hub.run_click(&mut click, p, &rules);
             host.hub.finish_click(click, p, &mut game.world, outcome)

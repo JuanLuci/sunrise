@@ -13,8 +13,8 @@ mod_api::impl_server_host_areas!(Server);
 impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server);
 impl mod_api::BackendMut for Server {}
-mod_api::impl_backend_mut_areas!(Server, except(entities));
-impl mod_api::prelude::EntitiesBackendMut for Server {
+mod_api::impl_backend_mut_areas!(Server, except(entity_actions));
+impl mod_api::prelude::EntityActionsBackendMut for Server {
     fn entity_run_command_with_output(
         &mut self,
         entity: mod_api::EntityRef,
@@ -59,7 +59,7 @@ fn command_output_proxy_preserves_inputs_order_and_refusal() {
         let transport = unsafe { host_dispatch::transport(pointer) };
         let seen = requests.clone();
         let transport: guest::Transport = Rc::new(move |id, bytes| {
-            seen.borrow_mut().push((id, bytes.to_vec()));
+            seen.borrow_mut().push((id.to_owned(), bytes.to_vec()));
             transport(id, bytes)
         });
         let previous =
@@ -106,7 +106,7 @@ fn command_output_proxy_preserves_inputs_order_and_refusal() {
     for (id, bytes) in requests.borrow().iter() {
         let mut out = Writer::new();
         // SAFETY: the context and borrowed host remain live for this synchronous call.
-        let result = unsafe { boundary::serve(*id, &mut cx, bytes, &mut out) };
+        let result = unsafe { boundary::serve(id, &mut cx, bytes, &mut out) };
         assert!(matches!(
             result,
             Err(boundary::ServeError::Missing("game backend"))

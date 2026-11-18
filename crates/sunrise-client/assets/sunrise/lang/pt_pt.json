@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vista",
   "sunrise.studio.topbar.view_short": "Vista",
   "sunrise.studio.unknown_server": "Desconhecido",
-  "sunrise.tempban.dedicated_required": "Os banimentos temporários exigem um servidor dedicado",
-  "sunrise.tempban.invalid_duration": "%s não é uma duração: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Há %s banimento(s) temporário(s):",
-  "sunrise.tempban.list.empty": "Não há banimentos temporários",
-  "sunrise.tempban.list.entry": "%1$s foi banido por %2$s %3$s (até %4$s)",
-  "sunrise.tempban.success": "%1$s durante %2$s, até %3$s",
-  "sunrise.tempban.usage": "/tempban <jogador> <duração> [motivo]",
   "sunrise.title.not_affiliated": "Não associado à Mojang ou à Microsoft"
 }

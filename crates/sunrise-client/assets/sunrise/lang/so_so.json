@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Aragti",
   "sunrise.studio.topbar.view_short": "Aragti",
   "sunrise.studio.unknown_server": "Lama garanayo",
-  "sunrise.tempban.dedicated_required": "Mamnuucyada ku meel gaarka ah waxay u baahan yihiin server gaar ah",
-  "sunrise.tempban.invalid_duration": "%s ma aha muddo: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Waxaa jira %s mamnuuc ku meel gaar ah:",
-  "sunrise.tempban.list.empty": "Ma jiraan mamnuuc ku meel gaar ah",
-  "sunrise.tempban.list.entry": "%1$s waxaa mamnuucay %2$s %3$s (ilaa %4$s)",
-  "sunrise.tempban.success": "%1$s muddo %2$s, ilaa %3$s",
-  "sunrise.tempban.usage": "/tempban <ciyaartoy> <muddo> [sabab]",
   "sunrise.title.not_affiliated": "Aan ku xidhnayn Mojang ama Microsoft"
 }

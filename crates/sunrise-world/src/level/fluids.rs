@@ -292,8 +292,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         result
     }
     /// `FlowingFluid.canPassThroughWall` from the cell at `source_pos` toward `direction`: each
-    /// cell's collision shape at its position, so a block entity's published shape stands over
-    /// the state's. A state whose block publishes nothing reads the state-only path below.
+    /// cell's collision shape at its position. Published and displaced shapes take priority
+    /// over the state cache; a translated shape does not enter either passage cache.
     fn can_pass_through_wall(
         &self,
         direction: Direction,
@@ -302,20 +302,25 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         target: BlockStateId,
     ) -> bool {
         let target_pos = rel(source_pos, direction);
-        let published = (
-            self.level.published_collision_shape(source_pos, source),
-            self.level.published_collision_shape(target_pos, target),
-        );
-        if published.0.is_some() || published.1.is_some() {
-            let shape = |published: Option<VoxelShape>, state| {
-                published.unwrap_or_else(|| self.collision_or_empty(state).1.clone())
-            };
-            let (source_shape, target_shape) =
-                (shape(published.0, source), shape(published.1, target));
+        let signals = self.signals();
+        let source_positioned = signals.positioned_collision(source_pos, source);
+        let target_positioned = signals.positioned_collision(target_pos, target);
+        if source_positioned.is_some() || target_positioned.is_some() {
+            let source_shape = source_positioned
+                .as_ref()
+                .unwrap_or_else(|| self.collision_or_empty(source).1);
+            let target_shape = target_positioned
+                .as_ref()
+                .unwrap_or_else(|| self.collision_or_empty(target).1);
             if target_shape.is_block() || source_shape.is_block() {
                 return false;
             }
-            return self.published_passage(source_shape, target_shape, direction);
+            if self.b.facts(source).collision_offset.is_some()
+                || self.b.facts(target).collision_offset.is_some()
+            {
+                return !merged_face_occludes(source_shape, target_shape, direction);
+            }
+            return self.published_passage(source_shape.clone(), target_shape.clone(), direction);
         }
         // The shapes are compared by identity and borrowed, never cloned: a
         // clone of the shared block or empty shape is atomic reference counts
@@ -1054,6 +1059,38 @@ pub(crate) fn merged_face_occludes(
 mod tests {
     use super::*;
     use crate::fluid::{ModFluidType, register_mod_fluid};
+
+    #[test]
+    #[ignore = "daily"]
+    fn displaced_collision_faces_and_fluid_walls_follow_the_column() {
+        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let registry = super::super::data::load_registry(&root).unwrap();
+        let mut behaviours = Behaviours::load(&registry, &root).unwrap();
+        let stone = registry.default_state("minecraft:stone").unwrap();
+        let air = behaviours.air();
+        // Both columns use the same state. The vertical seed nibble is 3 at (1,2)
+        // (stone's top drops below the cell face), and 15 at (0,1) (no displacement).
+        behaviours.facts[stone.0 as usize].collision_offset = Some((0.0, 0.2));
+        let mut level = super::super::tests::TestLevel::new(&behaviours);
+        let mut ticks = super::super::Ticks::new(0);
+        for (x, z, closed) in [(1, 2, false), (0, 1, true), (1, 2, false)] {
+            let pos = BlockPos::new(x, 64, z);
+            level.set_raw(pos, stone);
+            let sim = behaviours.sim(&mut level, &mut ticks);
+            assert_eq!(sim.collision_face_full_at(pos, Direction::Up), closed);
+            assert_eq!(sim.multiface_can_attach_at(pos, Direction::Down), closed);
+            let top = 1 << Direction::Up as u8;
+            assert_eq!(sim.shape_info_at(stone, pos).full_faces & top != 0, closed);
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Up, pos, stone, air),
+                !closed
+            );
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Down, above(pos), air, stone),
+                !closed
+            );
+        }
+    }
 
     fn mod_fluid(id: &str, tick_delay: i32) -> FluidKind {
         FluidKind::Mod(

@@ -30,6 +30,13 @@ mod content {
         }
     }
     pub(super) mod registry_keys {
+        pub(in crate::tests) fn block_id(key: super::super::BlockKey) -> Option<&'static str> {
+            use super::super::BlockKey;
+            match key {
+                BlockKey::Test => Some("test:block"),
+                BlockKey::Other => Some("test:other"),
+            }
+        }
         pub(in crate::tests) fn block_key(name: &str) -> Option<super::super::BlockKey> {
             match name {
                 "test:block" => Some(super::super::BlockKey::Test),
@@ -138,6 +145,11 @@ mod generated {
         BlockEntityTickReply, BlockFace, BlockKey, BlockState, CrosshairTarget,
     };
     pub use sunrise_mod_api_macros::__subscriptions;
+    // What `#[__subscriptions]` marks each implemented hook with: these listeners are not built for wasm.
+    macro_rules! __sunrise_mark {
+        ($owner:literal $method:ident) => {};
+    }
+    pub(crate) use __sunrise_mark;
 }
 use generated::*;
 struct Installed {
@@ -321,11 +333,179 @@ impl Parts {
         &self.entities
     }
 }
+thread_local! {
+    // These fixtures use bare trait references. Give the disabled attachment an owner
+    // without changing the representation for every other fixture's Parts table.
+    static DISABLED_BLOCK_PART: std::cell::Cell<Option<(&'static str, *const ())>> = const { std::cell::Cell::new(None) };
+}
+fn any_mod_disabled() -> bool {
+    DISABLED_BLOCK_PART.get().is_some()
+}
+fn disabled_owner_part<P: ?Sized>(parts: &[&P], id: Option<&str>) -> Option<usize> {
+    let (owner, disabled) = DISABLED_BLOCK_PART.get()?;
+    let (namespace, _) = id?.split_once(':')?;
+    if owner != namespace {
+        return None;
+    }
+    parts
+        .iter()
+        .position(|part| std::ptr::from_ref(*part).cast() == disabled)
+}
 fn entered_parts<'a, P: ?Sized>(
     parts: &'a [&'a P],
     _: &'static str,
 ) -> impl Iterator<Item = &'a P> {
-    parts.iter().copied()
+    let disabled = DISABLED_BLOCK_PART.get().map(|(_, part)| part);
+    parts
+        .iter()
+        .copied()
+        .filter(move |part| disabled != Some(std::ptr::from_ref(*part).cast()))
+}
+
+#[test]
+fn a_disabled_owner_answers_only_at_its_dispatch_position() {
+    struct Probe(Option<InteractionResult>, std::sync::atomic::AtomicUsize);
+    impl BlockPart for Probe {
+        fn block_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+        fn use_without_item(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &mut UseWithoutItemEvent<'_>,
+        ) -> Option<InteractionResult> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.0
+        }
+    }
+    let before = leak(Probe(
+        Some(InteractionResult::SuccessServer),
+        Default::default(),
+    ));
+    let declines = leak(Probe(None, Default::default()));
+    let owner: &dyn BlockPart = leak(Probe(None, Default::default()));
+    let after = leak(Probe(
+        Some(InteractionResult::SuccessServer),
+        Default::default(),
+    ));
+    DISABLED_BLOCK_PART.set(Some(("test", std::ptr::from_ref(owner).cast())));
+    let interact = |first: &'static dyn BlockPart| {
+        install_parts(Parts {
+            blocks: vec![(BlockKey::Test, vec![first, owner, after])],
+            ..Parts::default()
+        });
+        let mut answer = None;
+        dispatch_use_without_item(
+            &mut TestHost,
+            BlockState::new(BlockKey::Test, 0),
+            &BlockClick(&()),
+            &mut answer,
+        );
+        answer
+    };
+    assert_eq!(interact(before), Some(InteractionResult::SuccessServer));
+    assert_eq!(interact(declines), Some(InteractionResult::Pass));
+    use std::sync::atomic::Ordering::Relaxed;
+    assert_eq!(before.1.load(Relaxed), 1);
+    assert_eq!(declines.1.load(Relaxed), 1);
+    assert_eq!(after.1.load(Relaxed), 0);
+    DISABLED_BLOCK_PART.set(None);
+}
+
+#[test]
+fn inert_growth_answers_keep_subscribed_crop_and_soil() {
+    struct Worldgen;
+    impl WorldgenHost for Worldgen {}
+    struct Draws;
+    impl RandomSource for Draws {}
+    let owner: &dyn BlockPart = leak(Mod {
+        id: 0,
+        calls: Arc::default(),
+    });
+    let non_owner: &dyn BlockPart = leak(Mod {
+        id: 1,
+        calls: Arc::default(),
+    });
+    DISABLED_BLOCK_PART.set(Some(("test", std::ptr::from_ref(owner).cast())));
+    install_parts(Parts {
+        blocks: vec![
+            (BlockKey::Test, vec![owner]),
+            (BlockKey::Other, vec![non_owner]),
+        ],
+        ..Parts::default()
+    });
+    WORLDGEN_PARTS.set(PARTS.get());
+    for (key, expected_valid, expected_soil) in [
+        (BlockKey::Test, Some(false), Some(None)),
+        (BlockKey::Other, None, None),
+    ] {
+        let state = BlockState::new(key, 0);
+        let mut valid = None;
+        dispatch_is_valid_bonemeal_target(
+            LevelSide::Server(&TestLevel),
+            LevelDimension,
+            BlockPos,
+            state,
+            &mut valid,
+        );
+        assert_eq!(valid, expected_valid);
+        let mut soil = None;
+        dispatch_on_tree_grow(&Worldgen, state, [1, 64, 2], &mut Draws, &mut soil);
+        assert_eq!(soil, expected_soil);
+    }
+    DISABLED_BLOCK_PART.set(None);
+}
+
+#[test]
+fn inert_support_signals_that_the_simulation_decides() {
+    let owner: &dyn BlockPart = leak(Mod {
+        id: 0,
+        calls: Arc::default(),
+    });
+    DISABLED_BLOCK_PART.set(Some(("test", std::ptr::from_ref(owner).cast())));
+    install_parts(Parts {
+        blocks: vec![(BlockKey::Test, vec![owner])],
+        ..Parts::default()
+    });
+    let other = BlockState::new(BlockKey::Other, 0);
+    for (key, disabled) in [(BlockKey::Test, true), (BlockKey::Other, false)] {
+        let state = BlockState::new(key, 0);
+        let (mut survives, mut inert) = (None, false);
+        dispatch_can_survive(
+            &TestLevel,
+            LevelDimension,
+            BlockPos,
+            state,
+            &mut survives,
+            &mut inert,
+        );
+        assert_eq!((survives, inert), (None, disabled));
+
+        let (mut may, mut inert) = (None, false);
+        dispatch_may_place_on(
+            &TestLevel,
+            LevelDimension,
+            state,
+            other,
+            BlockPos,
+            &mut may,
+            &mut inert,
+        );
+        assert_eq!((may, inert), (None, disabled));
+
+        let (mut sustains, mut inert) = (None, false);
+        dispatch_can_sustain_plant(
+            &TestLevel,
+            LevelDimension,
+            other,
+            state,
+            BlockPos,
+            &mut sustains,
+            &mut inert,
+        );
+        assert_eq!((sustains, inert), (None, disabled));
+    }
+    DISABLED_BLOCK_PART.set(None);
 }
 
 #[test]

@@ -166,6 +166,11 @@ unavailable and `Some(None)` for an empty slot. Each read checks the world epoch
 so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
 
+Server hooks can also read the acting player's supported menu through
+`player.container_menu(host)`. Inventory, equipment, cursor and ender contents come from
+that player's current turn state, not the temporarily swapped-out record. The unsupported
+menu kinds, hidden-slot refusal and stale-generation checks still apply.
+
 Mutable client hooks can submit a vanilla click with
 `menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])`. The slot is the same menu-order
 index used by `slot`, not a hotbar index or a GUI slot id. For example:

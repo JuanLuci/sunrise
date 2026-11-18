@@ -5,11 +5,13 @@ pub trait Hooks {
     /// held item, on the server for each player. An answer replaces the
     /// template's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on
     /// the main hand, and `Pass` goes on to the item's `useOn`.
+    /// A disabled owner's subscribed interaction passes without running the block template.
     #[hook(
         side = "server",
         contract = "replace",
         out = "answer",
         scope = "block",
+        inert = "*answer = Some(InteractionResult::Pass);",
         key = "state",
         neoforge = "none (vanilla BlockBehaviour.useItemOn; PlayerInteractEvent.RightClickBlock cancels or answers before it)"
     )]

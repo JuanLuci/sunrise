@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Gwel",
   "sunrise.studio.topbar.view_short": "Gwel",
   "sunrise.studio.unknown_server": "Dianav",
-  "sunrise.tempban.dedicated_required": "Ezhomm zo eus ur servijer gouestlet evit ar bannadennoù da c'hortoz",
-  "sunrise.tempban.invalid_duration": "N'eo ket %s ur pad : 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Setu %s bannadenn da c'hortoz :",
-  "sunrise.tempban.list.empty": "N'eus bannadenn da c'hortoz ebet",
-  "sunrise.tempban.list.entry": "Bannet e voe %1$s gant %2$s %3$s (betek %4$s)",
-  "sunrise.tempban.success": "%1$s e-pad %2$s, betek %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "N'eo ket stag ouzh Mojang pe Microsoft"
 }

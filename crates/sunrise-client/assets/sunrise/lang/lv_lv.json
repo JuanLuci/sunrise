@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Skats",
   "sunrise.studio.topbar.view_short": "Skats",
   "sunrise.studio.unknown_server": "Nezināms",
-  "sunrise.tempban.dedicated_required": "Īslaicīgiem aizliegumiem vajadzīgs dedikēts serveris",
-  "sunrise.tempban.invalid_duration": "%s nav ilgums: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Ir %s īslaicīgi aizliegumi:",
-  "sunrise.tempban.list.empty": "Nav īslaicīgu aizliegumu",
-  "sunrise.tempban.list.entry": "%1$s aizliedza %2$s %3$s (līdz %4$s)",
-  "sunrise.tempban.success": "%1$s uz %2$s, līdz %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Nav saistīts ar Mojang vai Microsoft"
 }

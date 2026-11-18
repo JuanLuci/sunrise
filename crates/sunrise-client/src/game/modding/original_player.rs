@@ -311,14 +311,12 @@ mod tests {
           (@custom "dylink.0" "\01\04\00\00\00\00")
           (import "env" "memory" (memory 1))
           (import "env" "__indirect_function_table" (table 1 funcref))
-          (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-          (import "sunrise" "host_reply" (func (param i32)))
+          {imports}
           (global $original (mut i64) (i64.const 0))
           (global $called (mut i32) (i32.const 0))
-          (func (export "sunrise_layout") (result i64) i64.const {layout})
           (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
           {data}
-          (func (export "sunrise_hook") (param i32) (result i64)
+          (func (export "sunrise_hook") (param i64) (result i64)
             global.get $called
             if
               i32.const 4096 global.get $original i64.store
@@ -335,7 +333,7 @@ mod tests {
             i32.const 28672 i32.const 512 i32.const 16 memory.copy
             i32.const 28688 i32.const 532 i32.const 528 i32.load i32.add i32.load8_u i32.store8
             i32.const 28689 global.get $original i64.store
-            i64.const {reply}))"#, layout=*mod_api::wire::LAYOUT, len=marker.bytes().len(), reply=(28672u64 << 32) | 25)).unwrap();
+            i64.const {reply}))"#, imports=sunrise_mod_wasm::fixture::wat_imports(), len=marker.bytes().len(), reply=(28672u64 << 32) | 25)).unwrap();
         let module = sunrise_mod_wasm::fixture::module(&bytes).unwrap();
         module.player_clone(host, event);
         assert_eq!(player.experience(host).unwrap().level, 42);

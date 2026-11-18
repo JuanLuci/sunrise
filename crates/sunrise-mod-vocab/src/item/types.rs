@@ -34,6 +34,17 @@ pub enum ModelError {
 // exhaustive: only registration creates a key
 pub struct ItemKey(pub(crate) u32);
 
+impl ItemKey {
+    /// The numeric registry id used by the game's item-scatter seeds, on either side.
+    /// Reads this side's prepared registry, with mod items after vanilla in content-plan order;
+    /// the number is not synced by the server. Returns `None` before registry completion or
+    /// if this key does not resolve. Unlike [`KeysHost::registry_protocol_id`], this read does
+    /// not require a connection. Save and send identifiers, never these session-local numbers.
+    pub fn registry_id(self, host: &dyn Host) -> Option<u32> {
+        crate::backend_of(host)?.item_registry_id(self)
+    }
+}
+
 /// A menu type (`minecraft:generic_9x3`) in the built-in menu registry, in
 /// registration order. A key stays valid until the game exits.
 // no wire: decoding validates the u32 slot with MenuKey::from_slot on the host; wasm carries the host-issued opaque token without consulting guest tables.
@@ -299,7 +310,6 @@ impl StatType {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct ItemFished {
     /// The bobber's entity id and position.
     pub hook: u32,
@@ -310,7 +320,6 @@ pub struct ItemFished {
 /// The slots an item's attribute modifier applies in (vanilla's
 /// `EquipmentSlotGroup`).
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EquipmentSlotGroup {
@@ -342,7 +351,6 @@ pub enum EquipmentSlotGroup {
 /// `ItemAttributeModifiers.Entry`): the attribute (`minecraft:armor`), the
 /// modifier, and the slots it applies in.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ItemAttributeModifier {
@@ -373,9 +381,7 @@ impl ItemAttributeModifier {
 /// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
 /// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq)]
 pub struct ItemAttributeModifiers {
     pub(crate) entries: Vec<ItemAttributeModifier>,
     pub(crate) changed: bool,
@@ -466,9 +472,7 @@ impl ItemAttributeModifiers {
 /// (`minecraft:sharpness`) with its level, in order. Private fields, edited
 /// through methods, so the game knows whether a mod changed them.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ItemEnchantments {
     pub(crate) entries: Vec<(Identifier, u32)>,
     pub(crate) changed: bool,

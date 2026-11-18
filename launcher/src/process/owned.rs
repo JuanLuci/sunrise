@@ -116,7 +116,7 @@ fn stop(entry: Entry) {
 #[cfg(windows)]
 fn stop(entry: Entry) {
     if entry.group {
-        let _ = std::process::Command::new(taskkill())
+        let _ = std::process::Command::new(super::taskkill())
             .args(["/PID", &entry.pid.to_string(), "/T", "/F"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -133,17 +133,6 @@ fn stop(entry: Entry) {
             CloseHandle(handle);
         }
     }
-}
-
-/// Windows' own `taskkill`, by its full path: never one a folder on `PATH` puts first.
-#[cfg(windows)]
-pub fn taskkill() -> std::path::PathBuf {
-    std::env::var_os("SystemRoot")
-        .map_or_else(
-            || std::path::PathBuf::from(r"C:\Windows"),
-            std::path::PathBuf::from,
-        )
-        .join(r"System32\taskkill.exe")
 }
 
 #[cfg(all(test, unix))]

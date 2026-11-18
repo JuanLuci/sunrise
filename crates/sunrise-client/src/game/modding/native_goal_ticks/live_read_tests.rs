@@ -114,3 +114,117 @@ fn scoped_host_resolves_other_real_players_from_the_game() {
         assert!(context.lookup_player(999).is_none());
     });
 }
+
+/// The body yaw is a mob's own raw `yBodyRot`, not a normalized facing or a
+/// player's: the scoped goal view and the game host agree, and a stale handle
+/// or another kind has none.
+#[test]
+#[ignore = "daily"]
+fn body_yaw_is_the_raw_mob_yaw_and_none_for_others() {
+    use crate::game::native_guest_turn_tests::with_guests;
+
+    with_guests(|game| {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        let mut mob = Mob::new(40, kind.clone(), Vec3::ZERO, 0.0);
+        mob.body_yaw = -725.5;
+        game.mobs.push(mob);
+        let entity = game.entity(40).expect("the mob's handle");
+        assert_eq!(entity.body_yaw(game), Some(-725.5));
+        assert!(game.entity_set_head_yaw(entity, 45.0));
+        assert_eq!(entity.body_yaw(game), Some(-725.5));
+
+        let stale = EntityRef::new(
+            mod_api::WorldEpoch::new(entity.epoch().get() + 1),
+            entity.id(),
+        );
+        assert_eq!(stale.body_yaw(game), None);
+
+        let players: Vec<_> = [12, 13]
+            .map(|conn| game.player(conn).expect("guest player").entity())
+            .into();
+        for player in &players {
+            assert_eq!(player.body_yaw(game), None);
+        }
+        game.others.push(crate::game::commands::OtherEntity {
+            attachment_lifetime: Default::default(),
+            knot_check: None,
+            eye: None,
+            join: Default::default(),
+            item_transformation: None,
+            interaction: None,
+            id: 41,
+            kind: "minecraft:marker".into(),
+            position: Vec3::ZERO,
+            yaw: 30.0,
+            pitch: 0.0,
+        });
+        let marker = game.entity(41).expect("the marker's handle");
+        assert_eq!(marker.body_yaw(game), None);
+
+        let mut dragon = crate::game::dragon::Dragon::new(Vec3::ZERO, 540.75, 0);
+        dragon.id = 42;
+        game.dragon.replace(dragon);
+        let dragon = game.entity(42).expect("the dragon's handle");
+        assert!(game.mob(dragon).is_some());
+        assert_eq!(dragon.body_yaw(game), Some(540.75));
+        let stale_dragon = EntityRef::new(stale.epoch(), dragon.id());
+        assert_eq!(stale_dragon.body_yaw(game), None);
+        let part = game.entity(43).expect("the dragon head's handle");
+        assert_eq!(part.body_yaw(game), None);
+
+        let other = game
+            .mobs
+            .iter()
+            .find(|mob| mob.id == 40)
+            .expect("the mob row");
+        let snapshot = [crate::game::creatures::seen(
+            other,
+            game.level.player_uuid,
+            game.items(),
+        )];
+        let live = OneMob(other);
+        let mut actor = Mob::new(9001, kind, Vec3::ZERO, 0.0);
+        actor.body_yaw = 815.25;
+        let own = EntityRef::new(entity.epoch(), actor.id);
+        let mut world = game.mob_world_base(&snapshot);
+        world.goal_host = Some(game);
+        world.live_mobs = Some(&live);
+        let context = GoalCx {
+            m: &mut actor,
+            w: &world,
+            host: game,
+        };
+        assert_eq!(own.body_yaw(&context), Some(815.25));
+        assert_eq!(entity.body_yaw(&context), Some(-725.5));
+        assert_eq!(dragon.body_yaw(&context), Some(540.75));
+        assert_eq!(stale_dragon.body_yaw(&context), None);
+        assert_eq!(part.body_yaw(&context), None);
+        assert_eq!(stale.body_yaw(&context), None);
+        for player in players {
+            assert_eq!(player.body_yaw(&context), None);
+        }
+        assert_eq!(marker.body_yaw(&context), None);
+        context.m.removed = true;
+        assert_eq!(own.body_yaw(&context), None);
+
+        let role = game.options.execution_role;
+        game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+        assert_eq!(entity.body_yaw(game), None);
+        assert_eq!(dragon.body_yaw(game), None);
+        game.options.execution_role = role;
+
+        game.mobs
+            .iter_mut()
+            .find(|mob| mob.id == 40)
+            .unwrap()
+            .removed = true;
+        assert_eq!(entity.body_yaw(game), None);
+        game.dragon.discard();
+        assert_eq!(dragon.body_yaw(game), None);
+    });
+}

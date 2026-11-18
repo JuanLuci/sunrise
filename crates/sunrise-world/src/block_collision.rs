@@ -2,7 +2,7 @@
 //! Context-sensitive families override the no-context cache explicitly.
 use crate::{
     block_collision_scan::CollisionBlock,
-    collision::CachedCollisionRegistry,
+    collision::{CachedCollisionRegistry, ShapeChannel},
     collision_context::CollisionContext,
     dynamic_support::{DynamicSupport, DynamicSupportError, DynamicSupportWorld},
     liquid_collision::{LiquidCollision, LiquidCollisionWorld},
@@ -101,6 +101,7 @@ impl<'r> BlockCollisionRegistry<'r> {
             // A block entity's shape can leave the cell, so a state that may publish is
             // always scanned for in the cells around its own, as vanilla's dynamic shapes are.
             let mut large = published
+                || cached.offset_collision(id)
                 || cached.cached_shape(id)?.is_none_or(|shape| {
                     Axis::ALL
                         .into_iter()
@@ -183,11 +184,18 @@ impl<'r> BlockCollisionRegistry<'r> {
             .get(state.0 as usize)
             .is_some_and(|flags| flags & 16 != 0)
     }
-    /// The state's cached shape, unless it may publish its own: a cached shape of such a state
-    /// stands only when its block entity holds none, so callers that read the cache go through
-    /// [`Self::collision_shape`] for it.
+    /// Whether the default collision can change with position through publication or an offset.
+    pub fn has_positioned_collision(&self, state: BlockStateId) -> bool {
+        self.publishes_shapes(state)
+            || self
+                .cached
+                .offset_limits(state, ShapeChannel::Collision)
+                .is_some()
+    }
+    /// The state's cached shape, unless it depends on the position. For those states,
+    /// callers go through [`Self::collision_shape`].
     pub fn static_shape(&self, state: BlockStateId) -> io::Result<Option<&VoxelShape>> {
-        if self.publishes_shapes(state) {
+        if self.has_positioned_collision(state) {
             return Ok(None);
         }
         self.cached.cached_shape(state)
@@ -242,7 +250,12 @@ impl<'r> BlockCollisionRegistry<'r> {
             .cached_shape(state)
             .map_err(CollisionQueryError::Data)?
         {
-            return Ok(shape.clone());
+            return Ok(self.cached.positioned_shape(
+                state,
+                ShapeChannel::Collision,
+                position,
+                shape,
+            ));
         }
         self.dynamic
             .get(&state)
@@ -285,7 +298,12 @@ impl<'r> BlockCollisionRegistry<'r> {
                 .cached
                 .context_collision_shape(state, context.entity_kind())
         {
-            return Ok(shape.clone());
+            return Ok(self.cached.positioned_shape(
+                state,
+                ShapeChannel::ContextCollision,
+                [position.x, position.y, position.z],
+                shape,
+            ));
         }
         match contextual.then(|| self.contextual.get(&state)).flatten() {
             Some(ContextualRule::Scaffolding(rule)) => Ok(rule.shape(context, position)),

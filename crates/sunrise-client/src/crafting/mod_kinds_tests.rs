@@ -1,6 +1,7 @@
 //! Literal registered-kind fixtures used by crafting menu tests.
 use super::*;
 use std::sync::Mutex;
+use sunrise_world::native_load_context as engine;
 type Calls = Arc<Mutex<Vec<Vec<u32>>>>;
 struct Kind {
     shape: Option<(u32, u32)>,
@@ -18,14 +19,19 @@ impl mod_api::CraftingRecipeKind for Kind {
         let value: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
         value["rest"]
             .as_u64()
-            .filter(|n| *n <= 2)
+            .filter(|n| *n <= 3)
             .map(|n| n as u32)
-            .ok_or("rest must be 0, 1 or 2".into())
+            .ok_or("rest must be 0, 1, 2 or 3".into())
     }
     fn write(&self, value: &u32) -> Result<String, String> {
         Ok(format!("{{\"rest\":{value}}}"))
     }
-    fn matches(&self, _: &u32, grid: CraftingGrid) -> bool {
+    fn matches(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        value: &u32,
+        grid: CraftingGrid,
+    ) -> bool {
         if self
             .shape
             .is_some_and(|shape| shape != (grid.width, grid.height))
@@ -33,18 +39,24 @@ impl mod_api::CraftingRecipeKind for Kind {
             return false;
         }
         grid.cells.iter().enumerate().all(|(i, cell)| {
-            if i == 0 {
+            if i == 0 || (*value == 3 && i == 4) {
                 cell.as_ref().is_some_and(|s| s.item() == self.input)
             } else {
                 cell.is_none()
             }
         })
     }
-    fn assemble(&self, _: &u32, _: CraftingGrid) -> Option<mod_api::ItemStack> {
+    fn assemble(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        _: &u32,
+        _: CraftingGrid,
+    ) -> Option<mod_api::ItemStack> {
         mod_api::ItemStack::new(self.output, 3)
     }
     fn remaining_items(
         &self,
+        context: &dyn mod_api::CraftingRemainders,
         value: &u32,
         grid: CraftingGrid,
     ) -> Option<Vec<Option<mod_api::ItemStack>>> {
@@ -55,6 +67,15 @@ impl mod_api::CraftingRecipeKind for Kind {
                 .collect(),
         );
         let mut out = vec![None; grid.cells.len()];
+        if *value == 3 {
+            out[4] = context.default_remainder(4);
+            let mut custom = mod_api::ItemStack::new(self.rest, 2).unwrap();
+            custom.set_damage(23);
+            out[0] = Some(custom);
+            assert!(context.default_remainder(5).is_none());
+            assert!(context.default_remainder(6).is_none());
+            return Some(out);
+        }
         out[0] = match value {
             1 => mod_api::ItemStack::new(self.input, 1),
             2 => mod_api::ItemStack::new(self.rest, 1),
@@ -120,6 +141,61 @@ pub(crate) fn with_shape_recipe(
     });
 }
 #[test]
+fn rectangular_kind_mixes_component_aware_defaults_custom_and_empty_cells() {
+    with_shape_recipe(3, Some((2, 3)), |recipes, calls| {
+        let load = engine::LoadContext::new(
+            engine::DataLoadOrigin::ServerDataLoad,
+            Arc::new(engine::LoadInputs::new(
+                Default::default(),
+                Default::default(),
+            )),
+            [],
+        );
+        let context = load.captured_loop_context(engine::LoopSide::Server);
+        let mut grid = vec![None; 9];
+        grid[0] = Some(ItemStack::new("test:input", 7));
+        let mut input = ItemStack::new("test:input", 3);
+        input.damage = 11;
+        let patch = Tag::Compound(
+            [(
+                "minecraft:custom_data".into(),
+                Tag::Compound([("marker".into(), Tag::Int(41))].into()),
+            )]
+            .into(),
+        );
+        input.extra = crate::item_data::decode_components(Some(&patch)).1;
+        grid[6] = Some(input.clone());
+        let mut expected = input;
+        expected.item = "test:rest".into();
+        expected.count = 1;
+        let default_calls = std::cell::Cell::new(0);
+        let result =
+            recipes.mod_remainders_rect(&context, "test:literal", &grid, 3, 2, 3, &|stack| {
+                assert_eq!(stack, grid[6].as_ref().unwrap());
+                default_calls.set(default_calls.get() + 1);
+                Some(expected.clone())
+            });
+        assert_eq!(default_calls.get(), 1);
+        assert_eq!(*calls.lock().unwrap(), [vec![7, 0, 0, 0, 3, 0]]);
+        assert_eq!(result[6], Some(expected));
+        let mut custom = ItemStack::new("test:rest", 2);
+        custom.damage = 23;
+        assert_eq!(result[0], Some(custom));
+        assert!(
+            result
+                .iter()
+                .enumerate()
+                .all(|(i, s)| i == 0 || i == 6 || s.is_none())
+        );
+        assert_eq!(
+            grid[6].as_ref().unwrap().count,
+            3,
+            "pre-take input is untouched"
+        );
+    });
+}
+
+#[test]
 fn serializer_refusal_skips_known_recipe_and_unknown_refuses_load() {
     with_recipe(0, |_, _| {
         let mut errors = Vec::new();
@@ -133,7 +209,7 @@ fn serializer_refusal_skips_known_recipe_and_unknown_refuses_load() {
         );
         assert_eq!(
             errors,
-            ["recipe test:bad.json, crafting kind test:literal: rest must be 0, 1 or 2"]
+            ["recipe test:bad.json, crafting kind test:literal: rest must be 0, 1, 2 or 3"]
         );
         let error = recipe_type("test:machine", "test:machine").unwrap_err();
         assert_eq!(
@@ -184,10 +260,15 @@ impl mod_api::CraftingRecipeKind for EmptyKind {
     fn write(&self, _: &()) -> Result<String, String> {
         Ok("{}".into())
     }
-    fn matches(&self, _: &(), grid: CraftingGrid) -> bool {
+    fn matches(&self, _context: &dyn mod_api::LoopContext, _: &(), grid: CraftingGrid) -> bool {
         grid.width == 2 && grid.height == 2 && grid.cells.iter().all(Option::is_none)
     }
-    fn assemble(&self, _: &(), _: CraftingGrid) -> Option<mod_api::ItemStack> {
+    fn assemble(
+        &self,
+        _context: &dyn mod_api::LoopContext,
+        _: &(),
+        _: CraftingGrid,
+    ) -> Option<mod_api::ItemStack> {
         mod_api::ItemStack::new(self.0, 3)
     }
 }
@@ -230,7 +311,7 @@ fn registered_kind_receives_the_full_empty_grid_at_every_match_entry() {
                 ItemStack::new("test:output", 3)
             );
             assert_eq!(
-                recipes.remainders("test:empty", &grid, 2, &|_| None),
+                recipes.remainders(context, "test:empty", &grid, 2, &|_| None),
                 [None, None, None, None]
             );
         },

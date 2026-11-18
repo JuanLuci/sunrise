@@ -876,7 +876,7 @@ impl Game<'_> {
                     q.z.floor() as i32,
                 ))
             };
-            let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
+            let seed = i64::from(self.item_number(&item.stack.item).unwrap_or(0))
                 + i64::from(item.stack.damage);
             let copies = item_render::cluster_poses_with_depth(
                 pose,

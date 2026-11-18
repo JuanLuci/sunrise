@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "表示",
   "sunrise.studio.topbar.view_short": "表示",
   "sunrise.studio.unknown_server": "不明",
-  "sunrise.tempban.dedicated_required": "一時的な BAN には専用サーバーが必要です",
-  "sunrise.tempban.invalid_duration": "%s は期間ではありません: 30m、12h、7d",
-  "sunrise.tempban.list.count": "一時的な BAN が %s 件あります:",
-  "sunrise.tempban.list.empty": "一時的な BAN はありません",
-  "sunrise.tempban.list.entry": "%1$s は %2$s によって %3$s BAN されました (%4$s まで)",
-  "sunrise.tempban.success": "%1$s を %2$s BAN しました (%3$s まで)",
-  "sunrise.tempban.usage": "/tempban <プレイヤー> <期間> [理由]",
   "sunrise.title.not_affiliated": "Mojang や Microsoft とは関係ありません"
 }

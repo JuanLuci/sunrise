@@ -52,6 +52,14 @@ pub const CULL_BACK: [i8; 4] = [0, 0, 0, 1];
 /// `Vertex::normal.w` of a shaded quad of an `entityCutoutCull` model (the bat): shaded by the
 /// normal like -127, and `entity.wgsl` also discards its back-facing pixels.
 pub const SHADED_CULL_W: i8 = -126;
+/// Whether a quad whose vertices carry `Vertex::normal.w` = `w` drops its back faces, as
+/// `entity.wgsl` decides it: [`CULL_BACK`]'s 1 (and up to 63) and [`SHADED_CULL_W`] (and the
+/// other negatives above -127) cull; -127, 0 and the rest draw both sides, as vanilla's no-cull
+/// render types (`entityCutoutNoCull`, the living models') do. Anything that culls on the CPU
+/// (a GUI model, a mod's scene) asks this so it keeps the faces the world keeps.
+pub fn culls_back_faces(w: i8) -> bool {
+    (1..64).contains(&w) || (-126..0).contains(&w)
+}
 /// `Vertex::normal` of a quad of an `entitySolid` model, which culls its back faces: a quad
 /// the shader shades by its normal keeps it ([`SHADED_CULL_W`]), a baked-colour one (no
 /// normal) gets [`CULL_BACK`].
@@ -149,13 +157,33 @@ impl TerrainVertex {
 }
 #[cfg(test)]
 mod cull_back_tests {
-    use super::{CULL_BACK, SHADED_CULL_W, cull_back};
+    use super::{CULL_BACK, SHADED_CULL_W, cull_back, culls_back_faces};
     /// #15322: a shaded `entitySolid` quad keeps its normal and culls; a baked one has
     /// no normal and only culls.
     #[test]
     fn cull_back_keeps_a_shaded_normal() {
         assert_eq!(cull_back([0; 4]), CULL_BACK);
         assert_eq!(cull_back([0, 127, 0, 127]), [0, 127, 0, SHADED_CULL_W]);
+    }
+    /// The w values `entity.wgsl` culls by: CULL_BACK and SHADED_CULL_W do, -127 (the living
+    /// models' entityCutoutNoCull) and the shaded/baked no-cull values do not.
+    #[test]
+    fn culls_back_faces_matches_the_entity_shader() {
+        assert!(culls_back_faces(CULL_BACK[3]));
+        assert!(culls_back_faces(SHADED_CULL_W));
+        assert!(culls_back_faces(cull_back([0, 127, 0, 127])[3]));
+        for keeps in [-127, 0, 64, 127] {
+            assert!(!culls_back_faces(keeps), "{keeps}");
+        }
+        // entity.wgsl's own test on w / 127: cull when 0 < w < 0.5 or -0.996 < w < 0.
+        for w in i8::MIN..=i8::MAX {
+            let f = f32::from(w) / 127.0;
+            assert_eq!(
+                culls_back_faces(w),
+                (f > 0.0 && f < 0.5) || (f < 0.0 && f > -0.996),
+                "{w}"
+            );
+        }
     }
 }
 #[cfg(test)]
@@ -1382,7 +1410,7 @@ impl MeshTables {
 }
 /// `OffsetType.XZ`/`XYZ`: a per-column jitter from `Mth.getSeed(x, 0, z)`.
 fn offset(info: &Info, x: i32, z: i32) -> Option<[f64; 3]> {
-    Some(sunrise_items::blocks::column_offset(info.offset?, x, z))
+    Some(sunrise_core::random::column_offset(info.offset?, x, z))
 }
 /// Border width: smooth lighting samples up to two blocks out along a face normal.
 const B: i32 = 2;

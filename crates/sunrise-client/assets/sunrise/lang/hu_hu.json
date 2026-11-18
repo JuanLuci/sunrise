@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Nézet",
   "sunrise.studio.topbar.view_short": "Nézet",
   "sunrise.studio.unknown_server": "Ismeretlen",
-  "sunrise.tempban.dedicated_required": "Az ideiglenes kitiltáshoz dedikált szerver kell",
-  "sunrise.tempban.invalid_duration": "a(z) %s nem időtartam: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s ideiglenes kitiltás van:",
-  "sunrise.tempban.list.empty": "Nincs ideiglenes kitiltás",
-  "sunrise.tempban.list.entry": "%2$s kitiltotta %1$s-t %3$s (eddig: %4$s)",
-  "sunrise.tempban.success": "%1$s %2$s időre, eddig: %3$s",
-  "sunrise.tempban.usage": "/tempban <játékos> <időtartam> [ok]",
   "sunrise.title.not_affiliated": "Nem áll kapcsolatban a Mojanggal vagy a Microsofttal"
 }

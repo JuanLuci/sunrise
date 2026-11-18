@@ -188,6 +188,18 @@ impl SignalAccess for ReadLevel<'_, '_> {
 }
 
 impl LevelHost for ReadLevel<'_, '_> {
+    fn block_face_sturdy(
+        &self,
+        pos: [i32; 3],
+        face: mod_api::BlockFace,
+        support: mod_api::SupportType,
+    ) -> Option<bool> {
+        self.game
+            .level_block_face_sturdy(self.level, pos, face, support)
+    }
+    fn can_see_sky(&self, pos: [i32; 3]) -> Option<bool> {
+        self.game.level_can_see_sky(self.level, pos)
+    }
     fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
         self.game.block_entity(self.level, pos)
     }

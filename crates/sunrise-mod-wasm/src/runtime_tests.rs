@@ -79,18 +79,17 @@ impl<F: FnMut() -> i64> mod_api::RandomSource for Random<F> {
     }
 }
 
-fn guest(layout: u64, body: &str) -> Vec<u8> {
-    guest_with_exports(layout, body, "")
+fn guest(body: &str) -> Vec<u8> {
+    guest_with_exports(body, "")
 }
-pub(super) fn guest_with_exports(layout: u64, body: &str, exports: &str) -> Vec<u8> {
+pub(super) fn guest_with_exports(body: &str, exports: &str) -> Vec<u8> {
+    let imports = crate::imports::fixtures::wat();
     wat::parse_str(format!(
         r#"(module
       (@custom "dylink.0" "\01\04\00\00\00\00")
       (import "env" "memory" (memory 1))
       (import "env" "__indirect_function_table" (table 1 funcref))
-      (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-      (import "sunrise" "host_reply" (func $reply (param i32)))
-      (func (export "sunrise_layout") (result i64) i64.const {layout})
+      {imports}
       (func $recurse (param $depth i32) (result i32)
         local.get $depth i32.eqz
         if (result i32) i32.const 0
@@ -98,7 +97,7 @@ pub(super) fn guest_with_exports(layout: u64, body: &str, exports: &str) -> Vec<
       (global $in_len (mut i32) (i32.const 0))
       (func (export "sunrise_in") (param i32) (result i32) local.get 0 global.set $in_len i32.const 512)
       {exports}
-      (func $hook (export "sunrise_hook") (param i32) (result i64) (local i32 i32)
+      (func $hook (export "sunrise_hook") (param i64) (result i64) (local i32 i32)
         i32.const 512 local.set 1 global.get $in_len local.set 2 {body})
     )"#
     ))
@@ -106,7 +105,7 @@ pub(super) fn guest_with_exports(layout: u64, body: &str, exports: &str) -> Vec<
 }
 fn module(body: &str) -> WasmMod {
     let engine = engine().unwrap();
-    let bytes = guest(*mod_api::wire::LAYOUT, body);
+    let bytes = guest(body);
     WasmMod::instantiate(
         &engine,
         DEFAULT_GROUP_MEMORY_MIB,
@@ -122,7 +121,7 @@ fn module(body: &str) -> WasmMod {
 fn call(module: &WasmMod) -> Option<u32> {
     call_at(module, 0)
 }
-fn call_at(module: &WasmMod, id: u32) -> Option<u32> {
+fn call_at(module: &WasmMod, id: u64) -> Option<u32> {
     module.call(
         CallClass::Hook,
         Frame::default(),
@@ -218,11 +217,11 @@ fn encoding_failure_refuses_partial_arguments() {
 fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
     crate::test_stack::on_guest_stack(|| {
         let bounds = crate::boundary::export_id("StructurePiece", "bounding_box").unwrap();
-        let random_id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let random_id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         for handler in [123, 999] {
             let module = module(&format!(
                 r#"
-        local.get 0 i32.const {bounds} i32.eq if (result i64)
+        local.get 0 i64.const {bounds} i64.eq if (result i64)
           local.get 1 i64.load i64.const 123 i64.ne if unreachable end
           i32.const 1024 i32.const 1 i32.store
           i32.const 1028 i32.const 2 i32.store
@@ -231,7 +230,7 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
           i32.const 1040 i32.const 5 i32.store
           i32.const 1044 i32.const 6 i32.store
           i64.const 4398046511128
-        else local.get 0 i32.const 1 i32.eq if (result i64)
+        else local.get 0 i64.const 1 i64.eq if (result i64)
           i32.const {random_id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host
           i32.const 8 i32.ne if unreachable end
           i64.const 8796093022216
@@ -273,7 +272,7 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
 #[test]
 fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i64.const 4398046511112"
         ));
@@ -309,7 +308,7 @@ fn guest_panic_text_is_logged_with_mod_id_and_no_reply() {
         for trailing in [false, true] {
             let module = module(&format!(
                 "i32.const {} local.get 1 local.get 2 i32.const -1 i32.const 0 call $host i32.const 0 i32.ne if unreachable end i64.const 0",
-                mod_api::wire::HOST_LOG
+                crate::imports::fixtures::log_id()
             ));
             let answer = module.call(
                 CallClass::Hook,
@@ -365,9 +364,11 @@ fn trap_and_deadline_stop_the_group() {
 #[test]
 fn a_member_cannot_bypass_group_limits_with_private_memories() {
     crate::test_stack::on_guest_stack(|| {
-        let bytes =
-            wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (memory 1))"#)
-                .unwrap();
+        let bytes = wat::parse_str(format!(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") {} (memory 1))"#,
+            crate::imports::fixtures::log_import()
+        ))
+        .unwrap();
         let refusal = WasmMod::instantiate(
             &engine().unwrap(),
             DEFAULT_GROUP_MEMORY_MIB,
@@ -397,7 +398,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
             DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
-                    name: "std",
+                    name: "libstd.so",
                     module: &std,
                 },
                 Member {
@@ -428,7 +429,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
         let id = crate::boundary::export_id("Hooks", "server_stopped").unwrap();
         let mut group = module.running.group.lock().unwrap();
         group.store.set_epoch_deadline(30_000);
-        fn step(module: &WasmMod, store: &mut Store<State>, id: u32) {
+        fn step(module: &WasmMod, store: &mut Store<State>, id: u64) {
             let memory = store.data().memory.unwrap();
             let input = module.input.call(&mut *store, 1).unwrap();
             memory.write(&mut *store, input as usize, &[0]).unwrap();
@@ -475,7 +476,7 @@ fn real_members_link_when_built() {
             DEFAULT_GROUP_MEMORY_MIB,
             &[
                 Member {
-                    name: "std",
+                    name: "libstd.so",
                     module: &std,
                 },
                 Member {
@@ -607,7 +608,6 @@ fn linker_heap_symbols_follow_all_members_static_data() {
 fn boundary_exports_are_per_member_but_other_sunrise_symbols_are_not() {
     crate::test_stack::on_guest_stack(|| {
         let bytes = guest_with_exports(
-            *mod_api::wire::LAYOUT,
             "i64.const 0",
             r#"
             (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
@@ -643,7 +643,10 @@ fn boundary_exports_are_per_member_but_other_sunrise_symbols_are_not() {
         }
 
         let bytes = wat::parse_str(
-        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (func (export "sunrise_shared")))"#,
+        format!(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") {} (func (export "sunrise_shared")))"#,
+            crate::imports::fixtures::log_import()
+        ),
     )
     .unwrap();
         let refusal = WasmMod::instantiate(
@@ -692,7 +695,7 @@ fn loader_refuses_poi_registration_before_unsupported_metadata_can_run() {
             "i64.const {}",
             (2048_u64 << 32) | bytes.len() as u64
         ));
-        let module = guest(*mod_api::wire::LAYOUT, &body);
+        let module = guest(&body);
         let manifest = sunrise_mod_package::manifest::Manifest::parse(&format!("id = 'poi_probe'\nname = 'POI probe'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
         let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
         assert!(loaded.mods.is_empty());
@@ -717,12 +720,11 @@ fn loader_initializes_and_installs_a_wasm_entry() {
     )
     .unwrap();
         let module = guest(
-            *mod_api::wire::LAYOUT,
-            r#"local.get 0 i32.const -256 i32.eq if (result i64)
+            r#"local.get 0 i64.const 4294967040 i64.eq if (result i64)
             i32.const 4096 local.get 2 i32.store
             i32.const 2048 local.get 1 local.get 2 memory.copy
             i64.const 0
-          else local.get 0 i32.const 2 i32.eq if (result i64)
+          else local.get 0 i64.const 2 i64.eq if (result i64)
             i64.const 8796093022208 i32.const 4096 i32.load i64.extend_i32_u i64.or
           else i64.const 4398046511108 end end"#,
         );
@@ -766,62 +768,12 @@ fn loader_initializes_and_installs_a_wasm_entry() {
 #[test]
 fn invalid_import_input_is_a_trap_not_a_host_panic() {
     crate::test_stack::on_guest_stack(|| {
-        let module = module(
-            "i32.const -1 i32.const -1 i32.const 16 i32.const 0 i32.const 0 call $host drop i64.const 0",
-        );
+        let module = module(&format!(
+            "i32.const {} i32.const -1 i32.const 16 i32.const 0 i32.const 0 call $host drop i64.const 0",
+            crate::imports::fixtures::log_id()
+        ));
         assert_eq!(call(&module), None);
         assert!(module.running.poisoned.load(Ordering::Relaxed));
-    })
-}
-
-#[test]
-fn layout_mismatch_is_a_mods_page_refusal() {
-    crate::test_stack::on_guest_stack(|| {
-        let engine = engine().unwrap();
-        let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
-        let refusal = WasmMod::instantiate(
-            &engine,
-            DEFAULT_GROUP_MEMORY_MIB,
-            &[Member {
-                name: "test",
-                module: &bytes,
-            }],
-            None,
-        )
-        .err()
-        .unwrap();
-        assert!(matches!(refusal, Refusal::Layout { .. }));
-        assert_eq!(
-            refusal.to_string(),
-            "built for another version of the mod API (including the prepared can_equip ABI)"
-        );
-    })
-}
-#[test]
-fn point_record_layout_mismatch_is_refused() {
-    crate::test_stack::on_guest_stack(|| {
-        let bytes = wat::parse_str(format!(
-            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-        (func (export "sunrise_layout") (result i64) i64.const {})
-        (func (export "sunrise_layout_ext") (result i64) i64.const {})
-        (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
-        (func (export "sunrise_hook") (param i32) (result i64) i64.const 0))"#,
-            *mod_api::wire::LAYOUT,
-            mod_points::POINT_LAYOUT ^ 1
-        ))
-        .unwrap();
-        let refusal = WasmMod::instantiate(
-            &engine().unwrap(),
-            DEFAULT_GROUP_MEMORY_MIB,
-            &[Member {
-                name: "points",
-                module: &bytes,
-            }],
-            None,
-        )
-        .err()
-        .unwrap();
-        assert!(matches!(refusal, Refusal::PointLayout { .. }));
     })
 }
 
@@ -863,10 +815,10 @@ fn callback_borrows_only_the_lent_context_and_restores_depth() {
 #[test]
 fn import_reply_retry_survives_a_nested_callback() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             r#"
-        local.get 0 i32.const 1 i32.eq
+        local.get 0 i64.const 1 i64.eq
         if (result i64)
           i64.const 2199023255560
         else
@@ -902,10 +854,10 @@ fn import_reply_retry_survives_a_nested_callback() {
 #[test]
 fn another_threads_hook_completes_after_an_import_releases_the_group() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             r#"
-            local.get 0 i32.eqz
+            local.get 0 i64.eqz
             if (result i64)
                 i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host
                 drop i64.const 8796093022216
@@ -1025,9 +977,9 @@ fn contended_hook_times_out_without_poisoning_the_group() {
 #[test]
 fn nested_load_calls_do_not_extend_the_outer_deadline() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
-            "local.get 0 i32.const 1 i32.eq if (result i64) i64.const 0 else i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216 end"
+            "local.get 0 i64.const 1 i64.eq if (result i64) i64.const 0 else i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216 end"
         ));
         let epoch = module.running.group.lock().unwrap().store.engine().clone();
         let entered = Cell::new(false);
@@ -1062,7 +1014,7 @@ fn dropping_a_handler_releases_its_id_on_the_next_call() {
     crate::test_stack::on_guest_stack(|| {
         let module = module(
             r#"
-        local.get 0 i32.const -255 i32.eq
+        local.get 0 i64.const 4294967041 i64.eq
         if (result i64)
           local.get 1 i32.load i32.const 1 i32.ne if unreachable end
           local.get 1 i64.load offset=4 i64.const 123 i64.ne if unreachable end
@@ -1169,7 +1121,7 @@ fn disable_clears_held_resources_before_retained_proxy_can_call() {
 #[test]
 fn disable_during_native_import_defers_resource_drop_until_call_returns() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
         ));
@@ -1216,7 +1168,7 @@ fn calling_module_borrow_is_cleared_after_success_and_trap() {
 #[test]
 fn native_panic_stops_group_before_held_resources_drop() {
     crate::test_stack::on_guest_stack(|| {
-        let id = crate::boundary::import_id("RandomSource", "next_long").unwrap();
+        let id = crate::boundary::import_index("RandomSource", "next_long").unwrap();
         let module = module(&format!(
             "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
         ));
@@ -1337,15 +1289,15 @@ fn released_dispatch_receiver_cannot_reenter_guest_while_unwinding() {
                 0
             }
         }
-        let bounds = crate::boundary::import_id("EnergyHandler", "amount").unwrap();
-        let release = mod_api::wire::HOST_RELEASE;
+        let bounds = crate::boundary::import_index("EnergyHandler", "amount").unwrap();
+        let release = crate::imports::fixtures::release_id();
         let module = module(&format!(
             r#"
-        local.get 0 i32.eqz if (result i64)
+        local.get 0 i64.eqz if (result i64)
           i32.const 0 local.get 1 i64.load i64.store
           i32.const {bounds} i32.const 0 i32.const 8 i32.const 2048 i32.const 24 call $host drop
           i64.const 0
-        else local.get 0 i32.const 1 i32.eq if (result i64)
+        else local.get 0 i64.const 1 i64.eq if (result i64)
           i32.const {release} i32.const 0 i32.const 8 i32.const 0 i32.const 0 call $host drop
           i64.const 0
         else
@@ -1398,7 +1350,7 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
         let amount = crate::boundary::export_id("EnergyHandler", "amount").unwrap();
         let module = module(&format!(
             r#"
-        local.get 0 i32.const {amount} i32.eq if (result i64)
+        local.get 0 i64.const {amount} i64.eq if (result i64)
           i32.const 1024 i32.const 17 i32.store
           i64.const 4398046511108
         else
@@ -1550,7 +1502,7 @@ fn depth_refusal_survives() {
     crate::test_stack::on_guest_stack(|| {
         capture_logs();
         let engine = engine().unwrap();
-        let bytes = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+        let bytes = guest("i64.const 2199023255556");
         let module = WasmMod::instantiate(
             &engine,
             DEFAULT_GROUP_MEMORY_MIB,
@@ -1708,8 +1660,8 @@ fn nested_workers_calling_each_others_group_refuse_instead_of_deadlocking() {
 fn trap_stops_group_not_independent_group() {
     crate::test_stack::on_guest_stack(|| {
         let engine = engine().unwrap();
-        let trap = guest(*mod_api::wire::LAYOUT, "unreachable");
-        let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+        let trap = guest("unreachable");
+        let echo = guest("i64.const 2199023255556");
         let members = WasmMod::instantiate(
             &engine,
             DEFAULT_GROUP_MEMORY_MIB,
@@ -1744,12 +1696,11 @@ fn a_refusal_keeps_every_member_of_the_group_answering() {
         // Refuses the first call with an empty error reply at 512, then echoes; the flag lives in
         // guest memory at 600, which the input write at 512 never touches.
         let flaky = guest(
-            *mod_api::wire::LAYOUT,
             r#"i32.const 600 i32.load if (result i64) i64.const 2199023255556 else
             i32.const 600 i32.const 1 i32.store i32.const 512 i32.const 0 i32.store
             i64.const 2203318222847 end"#,
         );
-        let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+        let echo = guest("i64.const 2199023255556");
         let members = WasmMod::instantiate(
             &engine,
             DEFAULT_GROUP_MEMORY_MIB,
@@ -1780,7 +1731,7 @@ fn refusal_log_names_each_member_and_hook_once() {
         capture_logs();
         // Hook 0 reports its empty error reply at 512, hook 7 at 516.
         let mut module = module(
-            r#"local.get 0 i32.eqz if (result i64) i32.const 512 i32.const 0 i32.store
+            r#"local.get 0 i64.eqz if (result i64) i32.const 512 i32.const 0 i32.store
            i64.const 2203318222847 else i32.const 516 i32.const 0 i32.store
            i64.const 2220498092031 end"#,
         );
@@ -2014,7 +1965,7 @@ fn generated_client_and_server_hooks_complete_sixty_thousand_frames() {
             .map(|(i, byte)| format!("i32.const {} i32.const {byte} i32.store8 ", 2048 + i))
             .collect();
         module(&format!(
-            "local.get 0 i32.eqz if (result i64)
+            "local.get 0 i64.eqz if (result i64)
             i64.const 4398046511108
             else i32.const 1024 i32.const 60000 call $recurse i32.store
             {stores} i64.const {} end",
@@ -2186,7 +2137,6 @@ fn prepared_runtime_writes_payload_once_for_eight_scalar_asks() {
     crate::test_stack::on_guest_stack(|| {
         // Protocol-only guest: slice B supplies the owned-stack slot dispatcher.
         let bytes = guest_with_exports(
-            *mod_api::wire::LAYOUT,
             "i64.const 0",
             r#"
             (func (export "prepare_can_equip") (result i64) i64.const 2199023255560)
@@ -2298,33 +2248,6 @@ fn a_lowered_limit_refuses_growth_inside_the_guest() {
 }
 
 #[test]
-fn old_unprepared_can_equip_fingerprint_is_refused_at_load() {
-    crate::test_stack::on_guest_stack(|| {
-        let old = mod_api::wire_core_layout();
-        assert_ne!(old, *mod_api::wire::LAYOUT);
-        let bytes = guest(old, "unreachable");
-        let refusal = WasmMod::instantiate(
-            &engine().unwrap(),
-            DEFAULT_GROUP_MEMORY_MIB,
-            &[Member {
-                name: "old_can_equip",
-                module: &bytes,
-            }],
-            None,
-        )
-        .err()
-        .unwrap();
-        assert!(
-            refusal
-                .to_string()
-                .contains("prepared can_equip ABI layout mismatch"),
-            "{refusal}"
-        );
-        assert!(refusal.to_string().contains("old unprepared layout"));
-    });
-}
-
-#[test]
 fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
     crate::test_stack::on_guest_stack(|| {
         let refusal = (1024u64 << 32) | u64::from(u32::MAX);
@@ -2340,7 +2263,7 @@ fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
                 (i32.store (i32.const 1024) (i32.const 0)) i64.const {refusal})
         "#
         );
-        let bytes = guest_with_exports(*mod_api::wire::LAYOUT, "unreachable", &exports);
+        let bytes = guest_with_exports("unreachable", &exports);
         let module = WasmMod::instantiate(
             &engine().unwrap(),
             DEFAULT_GROUP_MEMORY_MIB,
@@ -2391,7 +2314,6 @@ fn refused_prepared_release_stops_group_before_another_stack_can_be_prepared() {
 fn contended_prepared_release_at_capacity_cleans_up_before_slot_reuse() {
     crate::test_stack::on_guest_stack(|| {
         let bytes = guest_with_exports(
-            *mod_api::wire::LAYOUT,
             "i64.const 2199023255556",
             r#"
             (func (export "prepare_can_equip") (result i64)

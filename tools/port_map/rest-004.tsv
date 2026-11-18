@@ -122,7 +122,7 @@ LocalPlayer.canSpawnSprintParticle	port	crates/sunrise-client/src/game/interface
 LocalPlayer.sendRidingJump	port	crates/sunrise-client/src/game/network/remote_vehicles.rs::riding_jump	START_RIDING_JUMP carrying the jump scale
 LocalPlayer.removeRecipeHighlight	port	crates/sunrise-client/src/recipe_book.rs::Settings::remove_highlight	gap: minor: the seen-recipe packet is not sent, so the server keeps the highlight
 LocalPlayer.moveTowardsClosestSpace	port	crates/sunrise-client/src/game.rs::Game::closest_space_nudge	the four body corners, 0.1 towards the nearest free side on its axis, a later corner overwriting an earlier one
-LocalPlayer.suffocatesAt	inline	crates/sunrise-client/src/game.rs::closest_space_nudge	the suffocates_at closure tests a full collision cube that is also a full render cube, over the body's Y span
+LocalPlayer.suffocatesAt	inline	crates/sunrise-client/src/game.rs::closest_space_nudge	the level suffocation predicate and collision-shape intersection over the deflated body-height column
 LocalPlayer.setExperienceDisplayStartTickToTickCount	inline	crates/sunrise-client/src/game/interface/locator_bar.rs::Game::track_experience_display
 LocalPlayer.handleEntityEvent	port	crates/sunrise-client/src/game/network/remote/mod.rs::Game::handle_packet	gap: minor: only the permission events 24 to 28 of the local player
 LocalPlayer.startUsingItem	port	crates/sunrise-client/src/game.rs::Game::use_hand

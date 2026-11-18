@@ -67,7 +67,7 @@ impl WasmHandler {
     fn belongs_to(&self, module: &WasmMod) -> bool {
         self.module.same_group(module)
     }
-    fn subscriptions(&self, owner: &'static str, id: u32) -> &'static [Option<mod_api::HookId>] {
+    fn subscriptions(&self, owner: &'static str, id: u64) -> &'static [Option<mod_api::HookId>] {
         let names = self
             .module
             .call(
@@ -97,7 +97,7 @@ impl WasmMod {
     fn call_payload<R>(
         &self,
         frame: boundary::Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         encode: impl FnOnce(&mut Writer),
         decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -114,7 +114,7 @@ impl WasmMod {
         &self,
         _: CallClass,
         frame: boundary::Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         encode: impl FnOnce(&mut Writer),
         decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -198,6 +198,15 @@ impl WasmMod {
 }
 struct Context;
 impl LoopContext for Context {
+    fn is_in_tag(&self, _: mod_api::ItemKey, _: mod_api::TagKey) -> Option<bool> {
+        None
+    }
+    fn item_count(&self, _: mod_api::TagKey) -> Option<usize> {
+        None
+    }
+    fn item_at(&self, _: mod_api::TagKey, _: usize) -> Option<mod_api::ItemKey> {
+        None
+    }
     fn side(&self) -> mod_api::LoopSide {
         mod_api::LoopSide::Server
     }
@@ -396,7 +405,7 @@ fn static_reply(
     }
     let bytes = out.into_bytes();
     guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
-    let result = guest::host(0, guest::begin())
+    let result = guest::host_named("test", guest::begin())
         .take_static::<()>()
         .map(|(text, ())| text);
     guest::set_transport(None);
@@ -448,7 +457,7 @@ fn static_reply_definitions_are_checked_before_acknowledgement() {
         let bytes = out.into_bytes();
         guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
         assert!(
-            guest::host(0, guest::begin())
+            guest::host_named("test", guest::begin())
                 .take_static::<bool>()
                 .is_err()
         );
@@ -1549,10 +1558,10 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     let corrupt = Rc::new(std::cell::Cell::new(false));
     let flag = corrupt.clone();
     guest::set_transport(Some(Rc::new(move |id, bytes| {
-        if id == mod_api::wire::HOST_LOG {
+        if id.starts_with("protocol:log#") {
             return Vec::new();
         }
-        if id == mod_api::wire::HOST_RELEASE {
+        if id.starts_with("protocol:release#") {
             let id = Reader::decode(bytes).unwrap();
             let released = unsafe { (&mut *pointer).held.remove(id) }.unwrap();
             drop(released);
@@ -1561,7 +1570,7 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         let _scope = unsafe { boundary::resource_scope(pointer, false) };
         let mut out = Writer::new();
         unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
-        if flag.get() && id != mod_api::wire::HOST_RELEASE {
+        if flag.get() && !id.starts_with("protocol:release#") {
             out.put(&0xffu8)
         }
         out.into_bytes()

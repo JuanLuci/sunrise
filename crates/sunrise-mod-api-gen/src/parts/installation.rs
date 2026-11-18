@@ -19,7 +19,11 @@ struct Schema {
 fn derived(record: &str, field: &str) -> bool {
     matches!(
         (record, field),
-        ("Parts", "hooks") | ("Installed", "epoch" | "hook_bits" | "tag_hook_bits")
+        ("Parts", "hooks")
+            | (
+                "Installed",
+                "epoch" | "hook_bits" | "tag_hook_bits" | "resolved_menus"
+            )
     )
 }
 

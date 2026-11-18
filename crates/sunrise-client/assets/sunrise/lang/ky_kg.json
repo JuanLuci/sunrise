@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Көрүнүш",
   "sunrise.studio.topbar.view_short": "Көрүнүш",
   "sunrise.studio.unknown_server": "Белгисиз",
-  "sunrise.tempban.dedicated_required": "Убактылуу тыюулар үчүн атайын сервер керек",
-  "sunrise.tempban.invalid_duration": "%s убакыт эмес: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s убактылуу тыюу бар:",
-  "sunrise.tempban.list.empty": "Убактылуу тыюулар жок",
-  "sunrise.tempban.list.entry": "%1$s'ге %2$s %3$s тыюу салды (%4$s чейин)",
-  "sunrise.tempban.success": "%1$s %2$s бою, %3$s чейин",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang же Microsoft менен байланышы жок"
 }

@@ -500,11 +500,18 @@ impl Game<'_> {
             ..self.menu_env()
         };
         menu.creative = creative;
+        // A server's client predicts with the server's crafting result, never its own.
+        menu.on_client = self.remote.is_some();
         menu.selected = self.selected;
         menu.levels = self.experience.level;
         if anvil_open {
-            // The rename box as AnvilScreen.onNameChanged gives it to the menu.
-            menu.anvil.name = self.station.as_ref().map(|s| self.anvil_item_name(s));
+            // The rename box as AnvilScreen.onNameChanged gives it to the menu; a server's
+            // client menu has the last name it sent (`itemName`, none in a new menu).
+            menu.anvil.name = if self.remote.is_some() {
+                self.station.as_ref().and_then(|s| s.anvil_sent.clone())
+            } else {
+                self.station.as_ref().map(|s| self.anvil_item_name(s))
+            };
         }
         for (i, stack) in before.iter().enumerate() {
             menu.set_slot(&env, i, stack.clone());
@@ -568,6 +575,11 @@ impl Game<'_> {
         } else {
             0
         };
+        if anvil_open && self.remote.is_some() {
+            // The AnvilScreen listens while the click is predicted (its slotChanged).
+            menu.anvil.seen_input = before[0].clone();
+            menu.anvil.screen = true;
+        }
         let outcome = run(&mut menu, &env, &to_menu);
         let made = maps.made.take();
         match outcome {
@@ -684,6 +696,17 @@ impl Game<'_> {
             && let Some(pos) = self.station.as_ref().map(|s| s.pos)
         {
             self.grindstone_taken(pos, amount);
+        }
+        if kind == Kind::Anvil && predicting {
+            // The names AnvilScreen.onNameChanged sent while the click ran go out before it.
+            for name in std::mem::take(&mut menu.anvil.renamed) {
+                if let Some(s) = self.station.as_mut() {
+                    s.anvil_sent = Some(name.clone());
+                }
+                self.send(sunrise_protocol::packets::play::Serverbound::RenameItem(
+                    sunrise_protocol::packets::play::RenameItem { name },
+                ));
+            }
         }
         if kind == Kind::Anvil || kind == Kind::Smithing {
             self.combiner_session_end(&menu, predicting);

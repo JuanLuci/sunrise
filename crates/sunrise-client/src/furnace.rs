@@ -543,20 +543,38 @@ mod crafting_remainder_tests {
                 damage: 2,
                 ..ItemStack::new("test:cell", 1)
             });
-            let first = recipes.remainders("missing", &grid, size, &worn);
+            let first = recipes.remainders(
+                crate::test_resources::server_loop_context(),
+                "missing",
+                &grid,
+                size,
+                &worn,
+            );
             assert_eq!(
                 first[cell].as_ref().map(|s| (s.damage, s.count)),
                 Some((3, 1))
             );
             assert_eq!(first.iter().flatten().count(), 1);
-            let second = recipes.remainders("missing", &first, size, &worn);
+            let second = recipes.remainders(
+                crate::test_resources::server_loop_context(),
+                "missing",
+                &first,
+                size,
+                &worn,
+            );
             assert_eq!(
                 second[cell].as_ref().map(|s| (s.damage, s.count)),
                 Some((4, 1))
             );
             assert!(
                 recipes
-                    .remainders("missing", &second, size, &worn)
+                    .remainders(
+                        crate::test_resources::server_loop_context(),
+                        "missing",
+                        &second,
+                        size,
+                        &worn
+                    )
                     .iter()
                     .all(Option::is_none)
             );
@@ -570,7 +588,13 @@ mod crafting_remainder_tests {
             ..ItemStack::new("test:cell", 1)
         };
         let grid = [Some(stack.clone()), None, None, None];
-        let crafted = recipes.remainders("missing", &grid, 2, &worn);
+        let crafted = recipes.remainders(
+            crate::test_resources::server_loop_context(),
+            "missing",
+            &grid,
+            2,
+            &worn,
+        );
         let mut furnace = crate::containers::Furnace {
             kind: crate::containers::FurnaceKind::Furnace,
             items: [Some(ItemStack::new("test:ore", 1)), Some(stack), None],

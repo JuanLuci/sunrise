@@ -67,6 +67,9 @@ impl Game<'_> {
         let Some(conn) = self.native_menu_guest(menu).map(|guest| guest.conn) else {
             return false;
         };
+        if self.lan_acting == Some(conn) {
+            return false;
+        }
         self.guest_close_menus_and_tell(conn);
         true
     }
@@ -146,12 +149,20 @@ impl Game<'_> {
         self.player(remote.profile)
     }
 
+    /// Resolve the menu's owner through the shared player boundary. The menu metadata,
+    /// crafting grid and native slots stay on the guest during a turn; inventory,
+    /// equipment, cursor and ender contents are swapped into Game.
+    pub(super) fn native_menu_player(&self, player: PlayerRef) -> Option<&Guest> {
+        match self.player_handle_read(player)? {
+            super::native_server::PlayerRead::Guest(guest) => Some(guest),
+            super::native_server::PlayerRead::Acting { .. } => {
+                self.lan.as_ref()?.hub.guest(self.lan_acting?)
+            }
+        }
+    }
+
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
-        let super::native_server::PlayerRead::Guest(guest) =
-            self.player_handle_read(menu.fields().player)?
-        else {
-            return None;
-        };
+        let guest = self.native_menu_player(menu.fields().player)?;
         let host = self.lan.as_ref()?;
         (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
         (guest.menu_generation == menu.fields().generation).then_some(())?;
@@ -174,7 +185,8 @@ impl Game<'_> {
 
     /// A player's current supported menu. Refuses crafting tables, merchants,
     /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// stale players and players whose state is swapped out on a server.
+    /// stale players and players whose state is swapped out by another active turn.
+    /// The acting player's inventory, equipment, cursor and ender reads use Game's state.
     /// On a client, only the local player's supported menu is available.
     pub(super) fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef> {
         self.player_read_both(player)?;
@@ -191,10 +203,7 @@ impl Game<'_> {
                 remote.menu.generation,
             ));
         }
-        let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
-        else {
-            return None;
-        };
+        let guest = self.native_menu_player(player)?;
         let menu = mod_api::__private::game::menu_ref(
             player,
             guest.menu.as_ref().map_or(0, |m| m.window),
@@ -306,17 +315,42 @@ impl Game<'_> {
         }
         let backing = self.menu_slot_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
+        let acting = self.lan_acting == Some(guest.conn);
         Some(match backing {
             MenuSlotBacking::BlockEntity { .. } | MenuSlotBacking::Entity { .. } => {
                 let world = self.native_level_world(self.level(&guest.dimension)?)?;
                 guest.menu.as_ref()?.slots.get(world, guest, slot)
             }
-            MenuSlotBacking::Player(n @ 0..36) => guest.inventory.get(n)?.clone(),
-            MenuSlotBacking::Player(n @ 36..40) => guest.armor[39 - n].clone(),
-            MenuSlotBacking::Player(_) => guest.offhand.clone(),
+            MenuSlotBacking::Player(n @ 0..36) => {
+                if acting {
+                    self.inventory.get(n)?.clone()
+                } else {
+                    guest.inventory.get(n)?.clone()
+                }
+            }
+            MenuSlotBacking::Player(n @ 36..40) => {
+                if acting {
+                    self.armor[39 - n].clone()
+                } else {
+                    guest.armor[39 - n].clone()
+                }
+            }
+            MenuSlotBacking::Player(_) => {
+                if acting {
+                    self.offhand.clone()
+                } else {
+                    guest.offhand.clone()
+                }
+            }
             MenuSlotBacking::CraftGrid(n) => guest.craft_grid.get(n)?.clone(),
             MenuSlotBacking::CraftResult => guest.craft_result.clone(),
-            MenuSlotBacking::Ender(n) => guest.ender_items.get(n)?.clone(),
+            MenuSlotBacking::Ender(n) => {
+                if acting {
+                    self.ender_items.get(n)?.clone()
+                } else {
+                    guest.ender_items.get(n)?.clone()
+                }
+            }
             MenuSlotBacking::Native(n) => guest.native_menu.get(n)?.clone(),
             // The place's mirror, refreshed after each click and each tick.
             MenuSlotBacking::Place(_) => guest.native_menu.get(slot)?.clone(),
@@ -387,7 +421,21 @@ impl Game<'_> {
             rules.set_container_limits(limits);
         }
         (slot < rules.slot_count()).then_some(())?;
-        load_player(&mut rules, guest);
+        if self.lan_acting == Some(guest.conn) {
+            for (n, stack) in self.inventory.iter().enumerate().take(36) {
+                rules.set_player_item(n, stack.clone());
+            }
+            for (n, stack) in self.armor.iter().enumerate() {
+                rules.set_player_item(39 - n, stack.clone());
+            }
+            rules.set_player_item(40, self.offhand.clone());
+            rules.selected = self.selected;
+            rules.creative = self.instabuild();
+            rules.levels = self.experience.level;
+            rules.carried = self.carried.clone();
+        } else {
+            load_player(&mut rules, guest);
+        }
         for (k, off) in disabled.iter().flatten().enumerate() {
             rules.data[k] = i32::from(*off);
         }
@@ -402,6 +450,11 @@ impl Game<'_> {
         slot: usize,
     ) -> Option<&mut Option<ItemStack>> {
         let backing = self.menu_slot_backing(menu, slot)?;
+        if let MenuSlotBacking::Ender(n) = backing
+            && self.lan_acting_uuid == Some(menu.fields().player.uuid())
+        {
+            return self.ender_items.get_mut(n);
+        }
         let guests = &mut self.lan.as_mut()?.hub.guests;
         let index = guests.iter().position(|g| {
             g.placed
@@ -422,7 +475,12 @@ impl Game<'_> {
             self.native_client_menu_name(menu)?;
             return Some(self.carried.clone());
         }
-        Some(self.native_menu_guest(menu)?.carried.clone())
+        let guest = self.native_menu_guest(menu)?;
+        Some(if self.lan_acting == Some(guest.conn) {
+            self.carried.clone()
+        } else {
+            guest.carried.clone()
+        })
     }
 }
 fn client_click_ops(

@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Beeld",
   "sunrise.studio.topbar.view_short": "Beeld",
   "sunrise.studio.unknown_server": "Onbekind",
-  "sunrise.tempban.dedicated_required": "Tiedelike bans höbbe un toegewiede server nuudig",
-  "sunrise.tempban.invalid_duration": "%s is gein tiedsdoer: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "D'r zien %s tiedelike ban(s):",
-  "sunrise.tempban.list.empty": "D'r zien gein tiedelike bans",
-  "sunrise.tempban.list.entry": "%1$s is verbanne door %2$s %3$s (tot %4$s)",
-  "sunrise.tempban.success": "%1$s veur %2$s, tot %3$s",
-  "sunrise.tempban.usage": "/tempban <speuler> <tied> [reasoen]",
   "sunrise.title.not_affiliated": "Neet geaffilieerd mit Mojang of Microsoft"
 }

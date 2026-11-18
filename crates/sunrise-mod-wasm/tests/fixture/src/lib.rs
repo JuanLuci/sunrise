@@ -381,6 +381,11 @@ impl Hooks for Mod {
             .blocks(&[])
             .build();
         registrar.block_entity_part(&reads, CounterReads).unwrap();
+        let looped = registrar
+            .block_entity_type("counter_loop")
+            .blocks(&[])
+            .build();
+        registrar.block_entity_part(&looped, CounterLoop).unwrap();
     }
 }
 
@@ -392,6 +397,8 @@ pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
 
 pub struct Counter;
 pub struct CounterReads;
+/// A tick that calls the host a thousand times: the guest-to-host cost of the boundary.
+pub struct CounterLoop;
 
 #[mod_api::sunrise_part]
 impl mod_api::BlockPart for CounterReads {}
@@ -410,6 +417,28 @@ impl mod_api::BlockEntityPart for CounterReads {
             .nbt
             .insert("counter".into(), mod_api::Tag::Int(17));
         event.entity.data = vec![if first == second { 24 } else { 25 }];
+        event.entity.items.clear();
+    }
+}
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockPart for CounterLoop {}
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockEntityPart for CounterLoop {
+    fn block_entity_tick(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::BlockEntityTickEvent<'_>,
+    ) {
+        let loaded = (0..1000)
+            .filter(|_| host.is_loaded(std::hint::black_box("wasm_fixture")))
+            .count();
+        event
+            .entity
+            .nbt
+            .insert("counter".into(), mod_api::Tag::Int(17));
+        event.entity.data = vec![if loaded == 1000 { 26 } else { 27 }];
         event.entity.items.clear();
     }
 }

@@ -1257,9 +1257,12 @@ impl ItemRenderer {
     ) {
         special::submit(self, model, argument, has_foil, pose, sprites, host, sink);
     }
-    /// `Item.getId` (0 when the registry report is missing).
-    pub fn item_id(&self, item: &str) -> i32 {
-        self.item_ids.get(item).copied().unwrap_or(0)
+    /// `Item.getId`, unavailable when the registry report or item is missing.
+    pub fn item_registry_id(&self, item: &str) -> Option<u32> {
+        self.item_ids
+            .get(item)
+            .copied()
+            .and_then(|id| id.try_into().ok())
     }
     pub(crate) fn part(&self, key: &str) -> Option<&ModelPart> {
         self.parts.get(key)

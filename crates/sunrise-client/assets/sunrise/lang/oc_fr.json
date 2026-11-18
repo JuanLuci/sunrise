@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Vista",
   "sunrise.studio.topbar.view_short": "Vista",
   "sunrise.studio.unknown_server": "Desconegut",
-  "sunrise.tempban.dedicated_required": "Los bans temporaris an besonh d'un servidor dedicat",
-  "sunrise.tempban.invalid_duration": "%s es pas una durada : 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "I a %s ban(s) temporari(s) :",
-  "sunrise.tempban.list.empty": "I a pas de bans temporaris",
-  "sunrise.tempban.list.entry": "%1$s foguèt banit per %2$s %3$s (fins a %4$s)",
-  "sunrise.tempban.success": "%1$s per %2$s, fins a %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Pas afiliat a Mojang o Microsoft"
 }

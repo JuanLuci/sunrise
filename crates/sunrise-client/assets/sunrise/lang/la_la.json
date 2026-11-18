@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Visus",
   "sunrise.studio.topbar.view_short": "Visus",
   "sunrise.studio.unknown_server": "Ignotum",
-  "sunrise.tempban.dedicated_required": "Interdicta temporaria servo dedicato egent",
-  "sunrise.tempban.invalid_duration": "%s duratio non est: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Sunt %s interdicta temporaria:",
-  "sunrise.tempban.list.empty": "Nulla interdicta temporaria sunt",
-  "sunrise.tempban.list.entry": "%1$s a %2$s %3$s interdictus est (usque ad %4$s)",
-  "sunrise.tempban.success": "%1$s per %2$s, usque ad %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Non foederataMojangor *Microsoft"
 }

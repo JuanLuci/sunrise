@@ -276,7 +276,7 @@ impl WinScreen {
         );
         batch.sprite_region(
             atlas,
-            crate::title_edition::SPRITE,
+            "gui/title/edition",
             [edition_x, logo_y + 44.0 - 7.0 + y_offs, 128.0, 14.0],
             128.0,
             16.0,

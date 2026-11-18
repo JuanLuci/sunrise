@@ -129,18 +129,7 @@ impl Game<'_> {
         };
         let [x, y, z] = hit.pos;
         let state = self.world.block(x, y, z);
-        let facts = self.res.facts().get(state);
-        let offset = match facts.outline_offset {
-            true => self.pack.context.tables.offset(state, x, z),
-            false => None,
-        }
-        .unwrap_or([0.0; 3]);
-        let base = [f64::from(x), f64::from(y), f64::from(z)];
-        let context = self.context_outline(hit.pos, state, true, &self.be_anims);
-        let boxes = context.as_slice().iter().chain(match context {
-            Some(_) => &[][..],
-            None => &facts.outline[..],
-        });
+        let boxes = self.outline_boxes_iter(&self.world, state, &self.be_anims, hit.pos, true);
         let uv = sunrise_client::gfx::lightning::white_uv(&self.gui.atlas.font.white());
         let [a, r, g, b] = argb.to_be_bytes();
         let color = u32::from_le_bytes([r, g, b, a]);
@@ -152,7 +141,7 @@ impl Game<'_> {
                 } else {
                     shape[i] - OUT
                 };
-                (base[i] + offset[i] + v - camera[i]) as f32
+                (v - camera[i]) as f32
             };
             // Each face: the axis it faces along, its side, and its corners' other two axes.
             for axis in 0..3 {

@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,6 +161,57 @@ class PolicyFiles(unittest.TestCase):
             "::error::expected 1 passing test from: cargo test -j3 -p pkg-lib --lib -- --exact b::two",
             "::error::expected 1 passing test from: cargo test -j3 -p pkg --lib -- --ignored --exact c::three",
         ])
+
+    def test_a_needs_test_the_workspace_build_made_runs_from_its_executable(self):
+        self.write("wasm-fixture.txt", "pkg a::one VAR needs\npkg-lib b::two VAR needs-plain\n")
+        one_pass = "test result: ok. 1 passed; 0 failed; 0 ignored;\n"
+        ran, commands = [], []
+
+        def run_binaries(package, executables, arguments, env):
+            ran.append((package, executables, arguments))
+            return subprocess.CompletedProcess([], 0, one_pass)
+
+        class Process:
+            def __init__(self, command, **_):
+                commands.append(command)
+                self.stdout = io.StringIO(one_pass)
+
+            def wait(self):
+                return 0
+
+        with patch.dict(os.environ, {"VAR": "fixture"}), patch.object(ignored_tests.subprocess, "Popen", Process), \
+                patch.object(ignored_tests, "run_binaries", run_binaries), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run_one_process_each("VAR", jobs=3, binaries={("pkg", "lib"): "/t/pkg-1"}), 0)
+        # Built: its executable, with the test's own selection; not built (pkg-lib): cargo, as before.
+        self.assertEqual(ran, [("pkg", {"lib": "/t/pkg-1"}, ["--ignored", "--exact", "a::one"])])
+        self.assertEqual(commands, [["cargo", "test", "-j3", "-p", "pkg-lib", "--lib", "--", "--exact", "b::two"]])
+
+    def test_prebuilt_runs_the_named_targets_and_refuses_what_the_build_did_not_make(self):
+        self.assertEqual(ignored_tests.cargo_targets(
+            ["-p", "pkg", "--features", "x", "--lib", "--test", "it", "--no-fail-fast", "--", "name", "--ignored"]),
+            ("pkg", ["lib", "test:it"], ["name", "--ignored"]))
+        built = Path(self.folder.parent) / "built.json"
+        built.write_text(json.dumps({"pkg lib": "/t/pkg-1", "pkg test:it": "/t/it-2"}))
+        ran = []
+        with patch.object(ignored_tests, "run_binaries",
+                          lambda package, executables, arguments, env: ran.append((package, executables, arguments))
+                          or subprocess.CompletedProcess([], 101, "test result: FAILED.\n")), \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--test", "it", "--", "x"]), 101)
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--test", "gone"]), 101)
+            self.assertEqual(ignored_tests.run_prebuilt(str(built) + ".missing", ["-p", "pkg", "--lib"]), 101)
+        self.assertEqual(ran, [("pkg", {"test:it": "/t/it-2"}, ["x"])])
+        self.assertIn("no test executable for pkg test:gone", log.getvalue())
+        # A filter that matched no test (renamed, or behind a feature the build left off) fails, naming it.
+        with patch.object(ignored_tests, "run_binaries", lambda *args: subprocess.CompletedProcess(
+                [], 0, "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\n")), \
+                contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--lib", "--", "guest_pool_"]), 101)
+        self.assertIn("no test of pkg lib ran with guest_pool_", log.getvalue())
+        with patch.object(ignored_tests, "run_binaries", lambda *args: subprocess.CompletedProcess(
+                [], 0, "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out\n")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run_prebuilt(str(built), ["-p", "pkg", "--lib", "--", "guest_pool_"]), 0)
 
 
 if __name__ == "__main__":

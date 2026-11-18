@@ -28,6 +28,8 @@ members = [
     "crates/sunrise-mod-points",
     "crates/sunrise-internals",
     "crates/sunrise-client-lib",
+    "crates/sunrise-gameplay",
+    "crates/sunrise-client-gameplay",
     "crates/sunrise-client-core",
     "crates/sunrise-client-input",
     "crates/sunrise-client-render",

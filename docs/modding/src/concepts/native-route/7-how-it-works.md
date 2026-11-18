@@ -32,7 +32,9 @@ same function shares its replacement cell: head listeners run first, then the co
 [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) is upstream's source-level mixin tool; the
 kinds and bindings are its vocabulary. The launcher applies one small patch to it,
 `tools/mixins/narrow-reference-rule.patch`, which accepts a call directly under `&` for the kinds that rewrite
-only that call. `E_MIXINS_PATCH` means that patch does not apply to the tool's source.
+only that call, and compares a binding's type with the target's as parsed types, so a trailing comma in a list
+(`Vec<T,>`) doesn't make two equal types differ. `E_MIXINS_PATCH` means that patch does not apply to the tool's
+source.
 
 Beside the docs linked from [Mixins](2-mixins.md#fields), the tool documents bridges in
 [scopes and bridges](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/scopes-and-bridges.md).

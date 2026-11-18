@@ -124,6 +124,10 @@ impl Game<'_> {
     }
     /// `container_opener_event` for a player who is not a spectator (a guest).
     pub(super) fn container_openers_changed(&mut self, key: (i32, i32, i32), open: bool) -> bool {
+        // Declared containers use their own counter, even on a lid-bearing template.
+        if self.mod_menu_at(key).is_some() {
+            return false;
+        }
         let pos = [key.0, key.1, key.2];
         let state = self.world.block(pos[0], pos[1], pos[2]).0;
         match self.be_anims.ticker(state) {

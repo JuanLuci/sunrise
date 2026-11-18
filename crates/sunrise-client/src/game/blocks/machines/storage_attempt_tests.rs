@@ -5,7 +5,7 @@ use mod_api::*;
 use std::sync::{Arc, Mutex};
 use sunrise_client::{
     chunk::Chunk,
-    containers::{BlockEntity, ModBlockEntity, ModContainer},
+    containers::{BlockEntity, ModBlockEntity, ModContainer, ModContainerInsertRule},
     items::ItemStack,
 };
 use sunrise_core::{
@@ -366,6 +366,7 @@ fn fixture(name: &str, test: impl FnOnce(&mut Game<'_>, LevelRef, Probe)) {
                         inputs: vec![0, 1],
                         outputs: vec![0, 1],
                         faces: std::array::from_fn(|_| vec![0, 1]),
+                        insert_rules: Vec::new(),
                         menu: None,
                     }),
                 )]
@@ -379,10 +380,116 @@ fn fixture(name: &str, test: impl FnOnce(&mut Game<'_>, LevelRef, Probe)) {
     });
 }
 
+fn default_fixture(name: &str, test: impl FnOnce(&mut Game<'_>)) {
+    if run_fresh_cases(name, "SUNRISE_MOD_CONTAINER_RULES_CHILD", &["game"]) {
+        return;
+    }
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        test(game);
+    });
+}
+
 fn place(game: &mut Game<'_>, pos: Pos, block: &str) {
     let state = game.pack.assets.registry.default_state(block).unwrap();
     game.world.set(pos.0, pos.1, pos.2, state).unwrap();
 }
+
+#[test]
+#[ignore = "daily"]
+fn hopper_respects_a_mod_container_only_when_empty_rule() {
+    default_fixture(
+        "game::machines::native_items::storage_attempt_tests::hopper_respects_a_mod_container_only_when_empty_rule",
+        |game| {
+            place(game, HOPPER, "minecraft:hopper");
+            hopper(
+                game,
+                vec![
+                    Some(ItemStack::new("minecraft:stone", 1)),
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
+            );
+            storage(
+                game,
+                BELOW,
+                vec![Some(ItemStack::new("minecraft:stone", 1)), None],
+            );
+            let barrel = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:barrel")
+                .unwrap();
+            game.world.block_entities.set_mod_containers(
+                [(
+                    barrel.0,
+                    Arc::new(ModContainer {
+                        slots: 2,
+                        faces: std::array::from_fn(|_| vec![0, 1]),
+                        inputs: vec![0, 1],
+                        outputs: vec![0, 1],
+                        insert_rules: vec![ModContainerInsertRule::OnlyWhenEmpty],
+                        ..Default::default()
+                    }),
+                )]
+                .into_iter()
+                .collect(),
+            );
+
+            game.world.game_time = 1;
+            game.tick_hopper(HOPPER);
+            assert_eq!(count(game, BELOW, 0), 1);
+            assert_eq!(count(game, BELOW, 1), 1);
+            assert_eq!(count(game, HOPPER, 0), 0);
+            assert_eq!(
+                game.world.block_entities.get(&BELOW).unwrap().slots()[1]
+                    .as_ref()
+                    .unwrap()
+                    .item
+                    .as_ref(),
+                "minecraft:stone"
+            );
+
+            hopper(
+                game,
+                vec![
+                    Some(ItemStack::new("minecraft:gold_ingot", 1)),
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
+            );
+            game.world
+                .block_entities
+                .get_mut(&BELOW)
+                .unwrap()
+                .slots_mut()[0] = None;
+            game.hoppers.get_mut(&HOPPER).unwrap().cooldown = 0;
+            game.world.game_time = 2;
+            game.tick_hopper(HOPPER);
+            assert_eq!(count(game, BELOW, 0), 1);
+            assert_eq!(
+                game.world.block_entities.get(&BELOW).unwrap().slots()[0]
+                    .as_ref()
+                    .unwrap()
+                    .item
+                    .as_ref(),
+                "minecraft:gold_ingot"
+            );
+        },
+    );
+}
+
 fn storage(game: &mut Game<'_>, pos: Pos, items: Vec<Option<ItemStack>>) {
     place(game, pos, "minecraft:barrel");
     let mut entity = ModBlockEntity::new("storage_attempts:machine".into(), Default::default());
@@ -901,6 +1008,7 @@ fn extract_notifications_cross_signal_each_tick_and_comparator_ticks_every_secon
                         inputs: vec![0],
                         outputs: vec![0],
                         faces: std::array::from_fn(|_| vec![0]),
+                        insert_rules: Vec::new(),
                         menu: None,
                     }),
                 )]

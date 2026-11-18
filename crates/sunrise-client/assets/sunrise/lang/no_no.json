@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Visning",
   "sunrise.studio.topbar.view_short": "Visning",
   "sunrise.studio.unknown_server": "Ukjent",
-  "sunrise.tempban.dedicated_required": "Midlertidige bannlysninger krever en dedikert server",
-  "sunrise.tempban.invalid_duration": "%s er ikke en varighet: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Det er %s midlertidig(e) bannlysning(er):",
-  "sunrise.tempban.list.empty": "Det er ingen midlertidige bannlysninger",
-  "sunrise.tempban.list.entry": "%1$s ble bannlyst av %2$s %3$s (til %4$s)",
-  "sunrise.tempban.success": "%1$s i %2$s, til %3$s",
-  "sunrise.tempban.usage": "/tempban <spiller> <varighet> [årsak]",
   "sunrise.title.not_affiliated": "Ikke tilknyttet Mojang eller Microsoft"
 }

@@ -4,7 +4,11 @@ use super::{
     hub::Hub,
     menu::{self, Menu, NativeMenuEvent, Rules, Slots, View},
 };
-use crate::{containers::BlockEntity, items::ItemStack, world::World};
+use crate::{
+    containers::{BlockEntity, ModContainerInsertRule},
+    items::ItemStack,
+    world::World,
+};
 use std::collections::HashMap;
 use sunrise_core::nbt::Tag;
 use sunrise_core::random::RandomSource;
@@ -70,6 +74,14 @@ pub struct PreparedClick {
     hidden: Vec<usize>,
     items: Option<Vec<Option<ItemStack>>>,
     container_limits: Vec<Option<u32>>,
+    pub(crate) container_insert_rules: Vec<ModContainerInsertRule>,
+}
+
+impl PreparedClick {
+    /// The declaration's per-slot admission rules, for the gameplay click path.
+    pub fn container_insert_rules(&self) -> &[ModContainerInsertRule] {
+        &self.container_insert_rules
+    }
 }
 
 impl Hub {
@@ -752,26 +764,50 @@ impl Hub {
         let shulker = in_menu
             && shulker_box.is_some()
             && self.guests[i].menu.as_ref().map(|m| m.kind) == shulker_box;
-        let (drag, hidden, items, container_limits) = self.guests.update(i, |guest| {
-            let drag = if in_menu {
-                guest.menu.as_mut().and_then(|m| m.drag.take())
-            } else {
-                guest.drag.take()
-            };
-            let hidden = guest
-                .menu
-                .as_ref()
-                .filter(|_| in_menu)
-                .map_or_else(Vec::new, |m| m.hidden.clone());
-            let items = source.and_then(|s| s.read(world, guest));
-            if in_menu && items.is_none() {
-                return None;
-            }
-            let container_limits = source
-                .map(|source| source.stack_limits(world, items.as_ref().map_or(0, Vec::len)))
-                .unwrap_or_default();
-            Some((drag, hidden, items, container_limits))
-        })?;
+        let (drag, hidden, items, container_limits, container_insert_rules) =
+            self.guests.update(i, |guest| {
+                let drag = if in_menu {
+                    guest.menu.as_mut().and_then(|m| m.drag.take())
+                } else {
+                    guest.drag.take()
+                };
+                let hidden = guest
+                    .menu
+                    .as_ref()
+                    .filter(|_| in_menu)
+                    .map_or_else(Vec::new, |m| m.hidden.clone());
+                let items = source.and_then(|s| s.read(world, guest));
+                if in_menu && items.is_none() {
+                    return None;
+                }
+                let container_limits = source
+                    .map(|source| source.stack_limits(world, items.as_ref().map_or(0, Vec::len)))
+                    .unwrap_or_default();
+                let mut container_insert_rules = source
+                    .map(|source| {
+                        source.container_insert_rules(world, items.as_ref().map_or(0, Vec::len))
+                    })
+                    .unwrap_or_default();
+                if let Some(range) = guest
+                    .menu
+                    .as_ref()
+                    .filter(|_| in_menu)
+                    .and_then(Menu::linked_slot_range)
+                {
+                    for slot in range {
+                        if let Some(rule) = container_insert_rules.get_mut(slot) {
+                            *rule = ModContainerInsertRule::Any;
+                        }
+                    }
+                }
+                Some((
+                    drag,
+                    hidden,
+                    items,
+                    container_limits,
+                    container_insert_rules,
+                ))
+            })?;
         Some(PreparedClick {
             i,
             in_menu,
@@ -781,6 +817,7 @@ impl Hub {
             hidden,
             items,
             container_limits,
+            container_insert_rules,
         })
     }
 

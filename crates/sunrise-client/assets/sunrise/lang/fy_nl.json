@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Byld",
   "sunrise.studio.topbar.view_short": "Byld",
   "sunrise.studio.unknown_server": "Ûnbekend",
-  "sunrise.tempban.dedicated_required": "Tydlike ferbannen freegje in wijdde tsjinner",
-  "sunrise.tempban.invalid_duration": "%s is gjin doer: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Der binne %s tydlike ferban(nen):",
-  "sunrise.tempban.list.empty": "Der binne gjin tydlike ferbannen",
-  "sunrise.tempban.list.entry": "%1$s waard ferballe troch %2$s %3$s (oant %4$s)",
-  "sunrise.tempban.success": "%1$s foar %2$s, oant %3$s",
-  "sunrise.tempban.usage": "/tempban <spiler> <doer> [reden]",
   "sunrise.title.not_affiliated": "Net oansletten by Mojang of Microsoft"
 }

@@ -96,7 +96,12 @@ impl Game<'_> {
             body.velocity = Vec3::new(x, y, z);
         }
         // Game.sync_player_body's part that depends on the blocks, as the replay does.
-        body.nudge = crate::game::closest_space_nudge(&body, &self.world, self.res.facts());
+        body.nudge = crate::game::closest_space_nudge(
+            &body,
+            &self.world,
+            self.collision,
+            self.level_suffocation(),
+        );
         MotionWorld {
             entities: &[],
             player: &mut body,

@@ -1,6 +1,6 @@
 //! Moving and turning an entity for native server mods, through an
 //! `EntityRef` (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387):
-//! teleport, collided moves, rotation, head yaw, facing, size and pushes. Writes move the
+//! teleport, collided moves, rotation, head and body yaw, facing, size and pushes. Writes move the
 //! entity as `/tp` and `/rotate` do, so clients see it as they see those.
 //! Reads return `None`, writes false, for a stale handle or on a client.
 use super::entity::{Entity as _, EntityHandle, with_entity_mut};
@@ -195,6 +195,17 @@ impl Game<'_> {
             return Some(self.mobs.iter().find(|m| m.id == id)?.head_yaw);
         }
         Some(0.0)
+    }
+    /// The yaw of the entity's body (`LivingEntity.yBodyRot`) in degrees as
+    /// vanilla keeps it, not normalized: mobs only, None for players and every
+    /// other kind, and for a stale handle.
+    pub(super) fn entity_body_yaw(&self, entity: EntityRef) -> Option<f32> {
+        match self.native_entity_target(entity)? {
+            Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.body_yaw),
+            // The dragon's flight yaw also drives its body and part poses.
+            Target::Dragon(_) => Some(self.native_dragon(entity)?.yaw),
+            _ => None,
+        }
     }
     /// Turns a mob's head to `yaw` (`Entity.setYHeadRot`); its body follows
     /// as its AI turns it. Players' heads can turn too; false for other kinds

@@ -26,10 +26,15 @@ impl<S: RecipeSerializer> crate::CraftingRecipeKind for ReadOnly<S> {
     fn write(&self, value: &Self::Value) -> Result<String, String> {
         self.0.write(value)
     }
-    fn matches(&self, _: &Self::Value, _: crate::CraftingGrid) -> bool {
+    fn matches(&self, _: &dyn crate::LoopContext, _: &Self::Value, _: crate::CraftingGrid) -> bool {
         false
     }
-    fn assemble(&self, _: &Self::Value, _: crate::CraftingGrid) -> Option<crate::ItemStack> {
+    fn assemble(
+        &self,
+        _: &dyn crate::LoopContext,
+        _: &Self::Value,
+        _: crate::CraftingGrid,
+    ) -> Option<crate::ItemStack> {
         None
     }
 }

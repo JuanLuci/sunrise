@@ -1403,25 +1403,52 @@ impl MotionWorld<'_, '_, '_> {
             }
         }
         let flying_y = self.player.flying.then_some(self.player.velocity.y);
+        self.living_travel(&mut gate, input)?;
+        if let Some(y) = flying_y {
+            self.player.velocity.y = y * 0.6;
+        }
+        Ok(())
+    }
+    /// `LivingEntity.travel`: in a fluid (`isAffectedByFluids`: not while
+    /// flying), gliding, or in the air.
+    fn living_travel(&mut self, gate: &mut MoveGate, input: Vec3) -> Result<()> {
         if !self.player.flying
             && (self.player.fluids.was_touching_water || self.player.is_in_lava())
         {
-            sunrise_world::living_fluid::travel_in_fluid(self, &mut gate, input)?;
+            sunrise_world::living_fluid::travel_in_fluid(self, gate, input)?;
+            Ok(())
         } else if self.player.fall_flying {
             // LivingEntity.travelFallFlying: on a climbable the glide ends and
             // the player moves like in the air.
             if self.climbable()? {
-                self.travel_in_air(&mut gate, input)?;
+                self.travel_in_air(gate, input)?;
                 self.player.fall_flying = false;
+                Ok(())
             } else {
-                self.travel_fall_flying(&mut gate)?;
+                self.travel_fall_flying(gate)
             }
         } else {
-            self.travel_in_air(&mut gate, input)?;
+            self.travel_in_air(gate, input)
         }
-        if let Some(y) = flying_y {
-            self.player.velocity.y = y * 0.6;
-        }
+    }
+    /// `Entity.rideTick` for a rider this client moves (`LocalPlayer`): its
+    /// deltaMovement starts at zero, then `LivingEntity.aiStep` travels it as
+    /// it does any entity it simulates (`Player.travel` for a passenger is
+    /// `LivingEntity.travel`, with no swimming or flight change), from where
+    /// it sat, with its own input (`LocalPlayer.applyInput`: a passenger slows
+    /// for neither an item nor sneaking); `LivingEntity.rideTick` then forgets
+    /// the fall. The caller seats it after (`positionRider`). The move leaves
+    /// the onGround and horizontalCollision its Rot packet carries, and the
+    /// deltaMovement a dismount teleport keeps (its DELTA_* are relative).
+    pub(crate) fn rider_travel_tick(&mut self, direction: [f32; 2]) -> Result<()> {
+        self.player.velocity = Vec3::ZERO;
+        let input = crate::input::modify_input(direction, None, None);
+        let mut gate = MoveGate::new();
+        self.living_travel(
+            &mut gate,
+            Vec3::new(f64::from(input[0]), 0.0, f64::from(input[1])),
+        )?;
+        self.player.fall_distance = 0.0;
         Ok(())
     }
     /// ServerPlayer's own travel: the server simulates a player too
@@ -1646,10 +1673,10 @@ impl MotionWorld<'_, '_, '_> {
         Ok(())
     }
     /// The block effects and the frost of a window's own player while a vehicle carries it. Its
-    /// client does not travel (`passenger_pose_tick` is all it runs), but `LivingEntity.aiStep`
-    /// still applies the effects of the blocks a passenger is in (`applyEffectsFromBlocks`: powder
-    /// snow's FREEZE adds a tick of frost) and thaws it when it is out of powder snow. The
-    /// frostbite overlay reads these ticks. The server's copy does this in `server_block_damage`.
+    /// own move is `rider_tick`'s; after it, `LivingEntity.aiStep` still applies the effects of
+    /// the blocks a passenger is in (`applyEffectsFromBlocks`: powder snow's FREEZE adds a tick of
+    /// frost) and thaws it when it is out of powder snow. The frostbite overlay reads these ticks.
+    /// The server's copy does this in `server_block_damage`.
     pub fn passenger_block_effects_tick(&mut self) -> Result<()> {
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
@@ -5042,6 +5069,83 @@ mod tests {
         assert_eq!(w.player.pose, crate::pose::Pose::Standing);
         assert_eq!(w.player.dimensions.eye_height, 1.62);
     }
+    /// A rider's own move (`rider_tick`): one beside a wall, holding forward, collides with it only
+    /// when its look is turned to it, so its look packet's flag follows this tick's look.
+    #[test]
+    #[ignore = "daily"]
+    fn a_riders_own_move_takes_this_ticks_look() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 2).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        for y in 4..=6 {
+            scene.set(20, y, 21, stone).unwrap();
+        }
+        let mut collided = Vec::new();
+        for yaw in [0.0, 180.0] {
+            // A hair from the wall at +z: forward at yaw 0 runs into it.
+            let mut player = PlayerMotion::new(resources, Vec3::new(20.5, 4.0, 20.69)).unwrap();
+            player.yaw = yaw;
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets,
+                collision_binding: binding,
+                resources,
+                health: &resources.health,
+            };
+            w.rider_tick([0.0, 1.0]).unwrap();
+            collided.push(w.player.collision.horizontal);
+        }
+        assert_eq!(collided, [true, false]);
+    }
+    /// A rider's fluids are this tick's before it moves: in water its own move is a fluid
+    /// one (`travelInFluid`: 0.8 of the motion, minus gravity / 16, so y is -0.005), out of
+    /// it an air one (gravity then 0.98: -0.0784), and the fall is forgotten either way.
+    #[test]
+    #[ignore = "daily"]
+    fn a_riders_own_move_follows_the_fluid_it_is_in_now() {
+        let Some(v) = crate::test_fixtures::vanilla() else {
+            return;
+        };
+        let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        let mut scene = World::test_scene(assets, render, 2).unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        for y in 6..=7 {
+            scene.set(20, y, 20, water).unwrap();
+        }
+        let mut fell = Vec::new();
+        for y in [6.2, 10.2] {
+            let mut player = PlayerMotion::new(resources, Vec3::new(20.5, y, 20.5)).unwrap();
+            player.fall_distance = 3.0;
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets,
+                collision_binding: binding,
+                resources,
+                health: &resources.health,
+            };
+            w.rider_tick([0.0, 0.0]).unwrap();
+            assert_eq!(w.player.fall_distance, 0.0);
+            assert!(!w.player.ground.on_ground);
+            fell.push(w.player.velocity.y);
+        }
+        assert!((fell[0] - -0.005).abs() < 1e-6, "{fell:?}");
+        assert!((fell[1] - -0.0784).abs() < 1e-6, "{fell:?}");
+    }
     /// #4509: a cushion seat clips the feet into the floor, so `can_fit_pose`
     /// rejects standing and would leave a swim pose; sit up anyway.
     #[test]
@@ -6350,20 +6454,17 @@ mod tests {
         );
         assert_eq!(w.player.fall_fly_ticks, 20);
     }
-    /// #9817: `LivingEntity.travelInAir`: a client (`level.isClientSide()`) whose
-    /// chunk below is not loaded skips gravity and falls at 0.1 a tick
-    /// (above `getMinY`), before the 0.98 vertical drag.
+    /// `LivingEntity.travelInAir` falls at 0.1 a tick on a client whose chunk below isn't loaded,
+    /// but 26.3's `ClientLevel.hasChunk` is always `true`: a client's player over a chunk that
+    /// hasn't come falls under gravity, as a server's does.
     #[test]
     #[ignore = "daily"]
-    fn a_client_over_an_unloaded_chunk_falls_at_a_tenth() {
+    fn a_player_over_an_unloaded_chunk_falls_under_gravity() {
         let Some(v) = crate::test_fixtures::vanilla() else {
             return;
         };
         let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
-        for (client_side, want) in [
-            (true, -0.1 * f64::from(0.98_f32)),
-            (false, -0.0784000015258789),
-        ] {
+        for client_side in [true, false] {
             let mut scene = World::test_scene(assets, render, 2).unwrap();
             // Far outside the test scene's chunks.
             let at = Vec3::new(10_000.5, 20.0, 10_000.5);
@@ -6385,7 +6486,10 @@ mod tests {
             }
             .controlled_simulation_tick(Default::default())
             .unwrap();
-            assert_eq!(player.velocity.y, want, "client_side={client_side}");
+            assert_eq!(
+                player.velocity.y, -0.0784000015258789,
+                "client_side={client_side}"
+            );
         }
     }
     /// `LivingEntity.aiStep`'s "freezing" part runs on a `ServerLevel` only: a client's player

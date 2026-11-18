@@ -702,7 +702,7 @@ mod tests {
             ];
             let mut original_layout_metadata = None;
             for exposed in [false, true] {
-                let mut types = super::Types::new(crate::index::Index::new(&root, &included)).unwrap();
+                let mut types = super::Types::new(crate::index::game(&root, &included)).unwrap();
                 let module = types.index.module("sunrise_core", &["identifier".into()]).unwrap();
                 if exposed {
                     // Native internals lowering exposes types and members to internals

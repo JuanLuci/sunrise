@@ -17,6 +17,8 @@ name: release
 # (a `nightly build` dry run, throwaway key) and publishes nothing.
 #   gh workflow run release --ref <branch> -f kind=nightly            # dry run: checks and decides, starts nothing
 #   gh workflow run release -f kind=nightly -f dry_run=false          # on main: the Nightly of daily-green
+#   gh workflow run release -f kind=nightly -f dry_run=false -f commit=<sha> -f exception="owner <date>: <why>"
+#                                                                     # only with the owner's one-time grant
 #   gh workflow run release -f kind=snapshot -f dry_run=false         # on main: a snapshot of main's head
 on:
   workflow_call:
@@ -54,6 +56,12 @@ on:
           the game (a nightly build dry run, throwaway key) and says what it would publish
         type: boolean
         default: true
+      exception:
+        description: >-
+          A nightly of a commit that is not daily-green: the owner's one-time grant (who, when, why), with that
+          commit's full SHA in `commit`. Never set otherwise; the rule stays. A snapshot ignores it
+        type: string
+        default: ''
       force:
         description: A Nightly even without player-facing changes, before merges settle, while paused or past the day's cap
         type: boolean
@@ -74,7 +82,12 @@ concurrency:
 jobs:
   decide:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A publishing run may wait for its commit's gate, run again when the next push cancelled it (GATE_RERUN).
+    timeout-minutes: 170
+    permissions:
+      contents: read
+      issues: read   # the open release-blocker issues
+      actions: write # dyna-checks' gate jobs, and running a cancelled one again (tools/release_train.py gate_again)
     outputs:
       release: ${{ steps.decide.outputs.release }}
       head: ${{ steps.decide.outputs.head }}
@@ -98,8 +111,11 @@ jobs:
           HEAD_SHA: ${{ inputs.commit }}
           FORCE: ${{ inputs.force && 'yes' || '' }}
           DAILY: ${{ inputs.daily && 'yes' || '' }}
+          EXCEPTION: ${{ inputs.exception }}
+          # A publishing run (not a dry run, on main) runs its commit's gate again if the next push cancelled it.
+          GATE_RERUN: ${{ steps.mode.outputs.dry_run == 'false' && '1' || '' }}
         run: |
-          python3 tools/release_train.py decide --kind game --channel "$KIND" ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} ${DAILY:+--daily} | tee decision.json
+          python3 tools/release_train.py decide --kind game --channel "$KIND" ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} ${DAILY:+--daily} ${EXCEPTION:+--exception "$EXCEPTION"} | tee decision.json
           echo "### $KIND: $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
 
   nightly:
@@ -116,8 +132,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.decide.outputs.head }}
           URGENT: ${{ needs.decide.outputs.urgent }}
+          EXCEPTION: ${{ inputs.exception }}
         run: |
-          gh workflow run nightly-build.yml --repo "$GITHUB_REPOSITORY" --ref main -f base="$HEAD_SHA" -f urgent="$URGENT"
+          gh workflow run nightly-build.yml --repo "$GITHUB_REPOSITORY" --ref main -f base="$HEAD_SHA" -f urgent="$URGENT" \
+            -f exception="$EXCEPTION"
           echo "### Started \`nightly build\` on ${HEAD_SHA:0:9}" >> "$GITHUB_STEP_SUMMARY"
 
   # A snapshot: the commit's SDK, built in this run by prebuilt-game-build.yml's legs and signed and published as

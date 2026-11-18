@@ -1295,9 +1295,15 @@ fn login_and_configure(
     let mut payload_negotiation = sunrise_protocol::payload_negotiation::Negotiation::new(
         payload_transport.local.manifest.clone(),
     );
-    // Query must precede known packs even for empty installations: a client
-    // answers it before its pack reply, so the barrier cannot overtake its Offer.
-    send_payload_control(c, sunrise_protocol::payload_negotiation::Control::Query)?;
+    // Only a mod's declaration opens negotiation before the client is known, as
+    // the client does: with the engine's alone a vanilla client is sent nothing
+    // vanilla's server would not send it. A Sunrise client is asked once it names
+    // itself, and answers before the barrier at its known-packs reply.
+    if payload_transport.local.has_mod_declarations()
+        && let Some(control) = payload_negotiation.initial()
+    {
+        send_payload_control(c, control)?;
+    }
     // Sunrise clients announce their list after recognizing our brand, before
     // answering known packs. That reply orders the announcement without a ping.
     let server_mods = sunrise_protocol::mod_list::local();
@@ -1335,8 +1341,9 @@ fn login_and_configure(
                     .string(32767)
                     .unwrap_or(brand);
                 if brand == "sunrise" {
-                    // The query was already sent before known packs.
-                    let _ = payload_negotiation.require_protocol();
+                    if let Some(control) = payload_negotiation.require_protocol() {
+                        send_payload_control(c, control)?;
+                    }
                     send(
                         c,
                         cfg::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -1370,6 +1377,18 @@ fn login_and_configure(
                 datapack_offer = Some(p.data);
             }
             cfg::Serverbound::SelectKnownPacks(p) => {
+                // A Sunrise client's Offer answers this server's Query (sent on its
+                // brand) or Offer (sent on its own Query), both after the known
+                // packs, so its pack reply may come first: a ping orders the Offer
+                // before the pong.
+                if brand == "sunrise" && payload_negotiation.accepted().is_none() {
+                    await_payload_answer(
+                        c,
+                        &payload_transport,
+                        &mut payload_negotiation,
+                        &mut info,
+                    )?;
+                }
                 let admission = payload_negotiation
                     .finish_without_offer()
                     .map_err(|e| e.to_string())
@@ -1621,6 +1640,38 @@ fn send_payload_control(
         .encode(),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The configuration ping that orders a Sunrise client's payload Offer before
+/// its pong (the content identity check pings with 0 later).
+const PAYLOAD_ANSWER_PING: i32 = 1;
+
+/// Read on until the client's Offer froze the negotiation, or its pong came: a client
+/// reads in order, so an answer to what it was sent on `sunrise:payloads` comes before
+/// the pong, and a pong without one is a client that does not negotiate. A pong after
+/// the Offer is read later with the configuration's other packets.
+fn await_payload_answer(
+    c: &mut ConfigIo<'_>,
+    transport: &Transport,
+    negotiation: &mut sunrise_protocol::payload_negotiation::Negotiation,
+    info: &mut ClientInformation,
+) -> Result<(), String> {
+    c.send(
+        &cfg::Clientbound::Ping(cfg::Ping {
+            id: PAYLOAD_ANSWER_PING,
+        })
+        .encode(),
+    )
+    .map_err(|e| e.to_string())?;
+    while negotiation.accepted().is_none() {
+        let (id, payload) = c.recv().map_err(|e| e.to_string())?;
+        match receive_configuration(c, id, &payload, transport, negotiation)? {
+            Some(cfg::Serverbound::Pong(p)) if p.id == PAYLOAD_ANSWER_PING => break,
+            Some(cfg::Serverbound::ClientInformation(i)) => *info = i,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 fn payload_disconnect(c: &mut ConfigIo<'_>, error: String) -> String {
     let reason = sunrise_core::nbt::Tag::String(error.as_str().into());
@@ -2772,9 +2823,14 @@ mod tests {
 
     #[test]
     fn sunrise_client_raw_protocol_admission_at_known_packs() {
-        for mode in [0, 1, 2] {
+        // 0: never answers on `sunrise:payloads` (it answers pings); 1: a wrong revision;
+        // 2: answers the server's Query after its known-packs reply, as the Sunrise client
+        // may; 3: holds its known-packs reply until it answered the Query, as sunrise-bots
+        // does (its Offer is in before the barrier: no ping).
+        for mode in [0, 1, 2, 3] {
             let wrong_version = mode == 1;
-            let compatible = mode == 2;
+            let compatible = mode >= 2;
+            let holds_packs = mode == 3;
             let config = crate::lan::NetConfig {
                 announce: false,
                 listen: false,
@@ -2810,6 +2866,12 @@ mod tests {
                 )
                 .unwrap();
             }
+            // The server asks once it reads the brand, after its known-packs request: mode 2
+            // answers that request first, so its Offer comes after its pack reply, and only
+            // the server's ping orders it before the barrier.
+            let mut packs_asked = false;
+            let mut held_packs = None;
+            let mut pings = Vec::new();
             loop {
                 let (id, payload) = c.recv().unwrap();
                 match cfg::Clientbound::decode(id, &payload).unwrap() {
@@ -2819,6 +2881,7 @@ mod tests {
                     {
                         use sunrise_protocol::payload_negotiation::{CHANNEL, Control, Manifest};
                         if Control::decode(&p.data).unwrap() == Control::Query {
+                            assert!(packs_asked, "the Query came before known packs");
                             c.send(
                                 &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                                     channel: CHANNEL.into(),
@@ -2827,13 +2890,27 @@ mod tests {
                                 .encode(),
                             )
                             .unwrap();
+                            if let Some(packs) = held_packs.take() {
+                                c.send(&cfg::Serverbound::SelectKnownPacks(packs).encode())
+                                    .unwrap();
+                            }
                         }
                     }
                     cfg::Clientbound::SelectKnownPacks(p) => {
-                        let _ = c.send(&cfg::Serverbound::SelectKnownPacks(p).encode());
+                        packs_asked = true;
+                        if holds_packs {
+                            held_packs = Some(p);
+                        } else {
+                            let _ = c.send(&cfg::Serverbound::SelectKnownPacks(p).encode());
+                        }
+                    }
+                    cfg::Clientbound::Ping(p) => {
+                        pings.push(p.id);
+                        let _ = c.send(&cfg::Serverbound::Pong(p).encode());
                     }
                     cfg::Clientbound::Disconnect(d) => {
                         assert!(!compatible, "compatible empty Sunrise peer refused");
+                        assert_eq!(pings, if wrong_version { vec![] } else { vec![1] });
                         let text = sunrise_protocol::text::plain(&d.reason, &Default::default());
                         assert!(text.contains(if wrong_version {
                             "protocol version"
@@ -2844,6 +2921,8 @@ mod tests {
                     }
                     cfg::Clientbound::FinishConfiguration(_) => {
                         assert!(compatible, "old Sunrise client admitted");
+                        assert!(held_packs.is_none(), "admitted before its pack reply");
+                        assert_eq!(pings, if holds_packs { vec![] } else { vec![1] });
                         c.send(
                             &cfg::Serverbound::FinishConfiguration(
                                 sunrise_protocol::packets::Empty,
@@ -2979,11 +3058,17 @@ mod tests {
             .encode(),
         )
         .unwrap();
+        // Vanilla's server sends a vanilla client its brand and no ping in configuration
+        // (ServerConfigurationPacketListenerImpl.startConfiguration): neither the mod list nor
+        // `sunrise:payloads`, even with the engine's declarations in this server's manifest.
+        let mut sent = Vec::new();
         loop {
             let (id, payload) = c.recv().unwrap();
             match cfg::Clientbound::decode(id, &payload).unwrap() {
-                cfg::Clientbound::CustomPayload(p) => {
-                    assert_ne!(p.channel, sunrise_protocol::mod_list::CHANNEL);
+                cfg::Clientbound::CustomPayload(p) => sent.push(p.channel),
+                cfg::Clientbound::Ping(p) => {
+                    sent.push(format!("ping {}", p.id));
+                    c.send(&cfg::Serverbound::Pong(p).encode()).unwrap();
                 }
                 cfg::Clientbound::SelectKnownPacks(p) => {
                     c.send(&cfg::Serverbound::SelectKnownPacks(p).encode())
@@ -3001,6 +3086,7 @@ mod tests {
                 _ => {}
             }
         }
+        assert_eq!(sent, ["minecraft:brand"]);
     }
 
     #[test]

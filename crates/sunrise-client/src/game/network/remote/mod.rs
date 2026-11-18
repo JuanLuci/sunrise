@@ -502,6 +502,8 @@ pub(super) struct Remote {
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<sunrise_client::items::Items>,
+    /// Whether the published snapshot includes the item registry, even if its table is empty.
+    pub(super) has_item_tags: bool,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<sunrise_client::enchant::Enchantments>>,
@@ -794,6 +796,9 @@ const CHUNK_PACKETS_PER_FRAME: Duration = Duration::from_millis(1);
 /// whatever inserting their columns costs, up to a column still decoding:
 /// the packets after a slow machine's chunks don't wait on its frames.
 const BACKLOG_LIMIT: Duration = Duration::from_millis(50);
+/// How long a tick about to run waits for one chunk column still decoding;
+/// past it the column, and what came after it, wait for the next frame.
+const TICK_DECODE_WAIT: Duration = Duration::from_millis(250);
 /// The open menu name of a server's horse inventory, then its chest's
 /// columns (the packet names no `MenuType`).
 const MOUNT_MENU: &str = "sunrise:mount";
@@ -1141,6 +1146,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1386,6 +1392,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -2153,7 +2160,21 @@ impl Game<'_> {
     /// already waited `BACKLOG_LIMIT`. A chunk packet still decoding holds
     /// back what follows it.
     pub(super) fn poll_remote(&mut self) -> Result<()> {
-        let polled = self.poll_remote_events();
+        self.poll_remote_with(false)
+    }
+    /// `Minecraft.runTick` handles every packet that came (`runAllTasks`)
+    /// before the frame's ticks. What this frame's poll left for later (chunks
+    /// past its budget or still decoding, and everything after them) is taken
+    /// when a tick is about to run, so the tick moves through those chunks and
+    /// a batch's `ChunkBatchReceived` goes out from it, as vanilla's does.
+    pub(in crate::game) fn poll_remote_before_tick(&mut self) -> Result<()> {
+        if self.remote.as_ref().is_none_or(|r| r.backlog.is_empty()) {
+            return Ok(());
+        }
+        self.poll_remote_with(true)
+    }
+    fn poll_remote_with(&mut self, before_tick: bool) -> Result<()> {
+        let polled = self.poll_remote_events(before_tick);
         // The block events and block changes of a piston clock start and end
         // thousands of moves at once: the collision view and the renderer
         // take them all in one sync, before the tick or frame reads them.
@@ -2351,6 +2372,7 @@ impl Game<'_> {
             .as_ref()
             .map(|d| (d.dimension.clone(), d.pos));
         if !same {
+            self.clock.reset_client_level_tick_state();
             // A new ClientLevel: Minecraft.setLevel stops every sound.
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
@@ -5204,12 +5226,15 @@ impl Game<'_> {
                 self.remote_server_data(p.icon.as_deref());
             }
             C::MapItemData(p) => self.remote_map_item_data(&p),
-            // handleTickingState / handleTickingStep: the level's TickRateManager.
-            C::TickingState(p) => {
+            // handleTickingState / handleTickingStep do nothing without a ClientLevel.
+            C::TickingState(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
                 self.clock.set_rate(p.rate);
                 self.clock.set_frozen(p.frozen);
             }
-            C::TickingStep(p) => self.clock.set_frozen_ticks_to_run(p.steps),
+            C::TickingStep(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
+                self.clock.set_frozen_ticks_to_run(p.steps);
+            }
+            C::TickingState(_) | C::TickingStep(_) => {}
             C::UpdateAdvancements(p) => self.remote_advancements(p),
             // handleAwardStats: StatsCounter.setValue for each.
             C::AwardStats(p) => {
@@ -6242,39 +6267,22 @@ impl Game<'_> {
         // Those added before it tick before it: their pushes reach this move.
         let pushed = self.remote_pushes(true);
         let sprint_window = self.settings.sprint_window;
-        let Some(player) = self.player.as_mut() else {
-            return Ok(());
-        };
-        let (cx, cz) = (
-            (player.position.x.floor() as i32) >> 4,
-            (player.position.z.floor() as i32) >> 4,
-        );
-        if !self.streaming.is_lit(cx, cz) {
-            // LocalPlayer.tick can wait for chunks, but Minecraft.tick still
-            // calls sendChanges: rotations and the 20-tick position reminder
-            // must continue, as well as moves into the unloaded area.
-            if let Some(r) = self.remote.as_ref()
-                && r.loaded_sent
-            {
-                let input = r.last_input;
-                self.remote_send_state(input);
-            }
+        if self.player.is_none() {
             return Ok(());
         }
-        // LocalPlayer.tick reaches Player.tick only once the client has loaded
-        // and the player's chunk is there; its endpoints bracket that work
-        // alone, also on the death screen, not the level pass before it.
-        let player = self
-            .remote
-            .as_ref()
-            .is_some_and(|r| r.loaded_sent)
-            .then(|| {
-                (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
-                    || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
-                .then(|| self.local_player())
-                .flatten()
-            })
-            .flatten();
+        // LocalPlayer.tick and sendChanges run once the client has loaded (hasClientLoaded),
+        // wherever the player is: a chunk that hasn't come yet has no blocks here, as vanilla's
+        // empty chunk has none, so the player falls through it until the chunk comes.
+        if !self.remote.as_ref().is_some_and(|r| r.loaded_sent) {
+            return Ok(());
+        }
+        // LocalPlayer.tick reaches Player.tick only once the client has loaded; its
+        // endpoints bracket that work alone, also on the death screen, not the level
+        // pass before it.
+        let player = (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+        .then(|| self.local_player())
+        .flatten();
         let player_from = entity_section_steps::player_before(self);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
@@ -6376,7 +6384,14 @@ impl Game<'_> {
         // (`yRotO`/`xRotO`), as the local tick does; `tick` returns before it
         // reaches its own write when this window is a server client.
         self.rope_rot_old = (self.yaw, self.pitch);
-        // A passenger moves with its vehicle (Entity.rideTick), not by itself.
+        // Entity.rideTick: the vehicle ticks first, then its rider, which moves itself
+        // from where it sat before (`rider_tick`, in the riding branch below, once its
+        // look and the vehicle's fluid shelter are this tick's); positionRider then puts
+        // it on the new seat and changes nothing else.
+        let old_seat = self
+            .riding
+            .filter(|_| self.screen != Screen::Dead)
+            .and_then(|_| self.player.as_ref().map(|p| p.position));
         let riding = self.screen != Screen::Dead && self.remote_ride(keys, sprint_window)?;
         // The server sends no passenger's position: they sit where their
         // vehicles are now.
@@ -6472,7 +6487,13 @@ impl Game<'_> {
                     tag_items: None,
                     block_registries: None,
                 };
-                passenger.passenger_pose_tick()?;
+                // The rider moves from its old seat; the new one is its place after.
+                let seat = passenger.player.position;
+                if let Some(from) = old_seat {
+                    passenger.player.position = from;
+                }
+                passenger.rider_tick(keys.direction())?;
+                passenger.player.position = seat;
                 // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
                 // frostbite overlay shows it (#8156).
                 passenger.passenger_block_effects_tick()?;
@@ -7504,6 +7525,12 @@ impl Game<'_> {
     /// vehicle and sprint, or `sendPosition`'s sprint and move. The held slot is not sent here:
     /// `MultiPlayerGameMode.tick` sends it at the start of the next tick (`remote_handle_input`).
     fn remote_send_state(&mut self, input: u8) {
+        // LocalPlayer.tickDeath removes the player once its deathTime reaches 20, and
+        // Minecraft.tick's sendChanges skips a removed player: nothing goes out until the
+        // respawn's new player, not even the position reminder.
+        if self.screen == Screen::Dead && self.ui.death_time >= 20 {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -7814,13 +7841,14 @@ impl Game<'_> {
                 return false;
             }
             // startDestroyBlock aborts only a break that is running; a target left by a stop that
-            // ended one is just replaced by the START below.
-            let aborted = self.remote.as_mut().and_then(|r| {
-                if !std::mem::take(&mut r.is_destroying) {
-                    return None;
-                }
-                r.destroying.take()
-            });
+            // ended one is just replaced by the START below. The abort leaves the running break's
+            // state as it was: a break that isn't instant replaces it below, and after an instant
+            // one the old target is still running, so the next start aborts it again.
+            let aborted = self
+                .remote
+                .as_ref()
+                .filter(|r| r.is_destroying)
+                .and_then(|r| r.destroying);
             if let Some((old, _, _)) = aborted {
                 let old_state = self.world.block(old[0], old[1], old[2]);
                 self.tutorial_destroy(old_state, -1.0);
@@ -11322,6 +11350,49 @@ pub(crate) mod tests {
                     "settled slots are not sent twice"
                 );
             });
+        });
+    }
+
+    /// `MultiPlayerGameMode.piercingAttack`: a spear's jab sends its STAB action and nothing else,
+    /// even with the look changed since the last move packet, so the 20-tick position reminder
+    /// keeps its count.
+    #[test]
+    #[ignore = "daily"]
+    fn a_spear_jab_sends_only_its_stab() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use std::sync::Arc;
+            use sunrise_client::{chunk::Chunk, items::ItemStack, motion::PlayerMotion};
+            use sunrise_core::geometry::Vec3;
+            use sunrise_protocol::packets::play;
+            let (mut peer, _writer) = connect_menu_test(game);
+            peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            game.set_mode_id(0);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.inventory[0] = Some(ItemStack::new("minecraft:iron_spear", 1));
+            game.selected = 0;
+            game.hand_strength.ticker = 100;
+            while peer.recv().is_ok() {}
+            game.yaw = 37.0;
+            assert!(game.remote_start_attack());
+            let mut sent = Vec::new();
+            while let Ok((id, bytes)) = peer.recv() {
+                match play::Serverbound::decode(id, &bytes) {
+                    Ok(play::Serverbound::PlayerAction(a)) => {
+                        sent.push(format!("action {}", a.action))
+                    }
+                    Ok(
+                        play::Serverbound::MovePlayerPos(_)
+                        | play::Serverbound::MovePlayerPosRot(_)
+                        | play::Serverbound::MovePlayerRot(_),
+                    ) => sent.push("move".into()),
+                    _ => {}
+                }
+            }
+            assert_eq!(sent, ["action 8"]);
         });
     }
 
@@ -15000,6 +15071,75 @@ pub(crate) mod tests {
         let done = game.remote_use_block(Hand::Main);
         assert!(done, "flint and steel useOn must end the click");
     }
+
+    /// EndCrystalItem.useOn ends the click either way: SUCCESS (the arm swings) on obsidian with
+    /// air and nothing above, FAIL (no swing) on grass or with the player in the space above. Each
+    /// sends one use_item_on and tries neither UseItem nor the off hand, whose shield stays down.
+    /// On cooldown its useOn doesn't run, and the click goes on to the item.
+    #[test]
+    #[ignore = "daily"]
+    fn an_end_crystal_click_on_a_block_ends_there() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use crate::game::Hit;
+            use std::sync::Arc;
+            use sunrise_client::{chunk::Chunk, first_person::Hand, motion::PlayerMotion};
+            use sunrise_core::geometry::Vec3;
+            use sunrise_protocol::packets::play;
+            let (mut peer, _writer) = connect_menu_test(game);
+            peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            game.set_mode_id(0);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = &game.pack.assets.registry;
+            let obsidian = registry.default_state("minecraft:obsidian").unwrap();
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            // Under the player (its own box fills the space above), clear, and grass.
+            game.world.set(0, 63, 0, obsidian).unwrap();
+            game.world.set(0, 63, 2, obsidian).unwrap();
+            game.world.set(0, 63, 4, grass).unwrap();
+            let crystal = ItemStack::new("minecraft:end_crystal", 4);
+            game.inventory[0] = Some(crystal.clone());
+            game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+            game.selected = 0;
+            while peer.recv().is_ok() {}
+            let aim = |game: &mut super::super::Game<'_>, z: i32| {
+                game.forced_hit = Some(Hit {
+                    pos: [0, 63, z],
+                    face: [0, 1, 0],
+                    point: [0.5, 64.0, f64::from(z) + 0.5],
+                    inside: false,
+                });
+            };
+            // The whole click (Minecraft.startUseItem): it ends at the block, so neither the main
+            // hand's air use nor the offhand's shield is tried, and nothing is held in use.
+            let mut click = |game: &mut super::super::Game<'_>, z: i32| {
+                aim(game, z);
+                let swings = game.swings_started;
+                game.remote_use(mod_api::InteractionAttempt::Press);
+                let mut sent = Vec::new();
+                while let Ok((id, bytes)) = peer.recv() {
+                    match play::Serverbound::decode(id, &bytes) {
+                        Ok(play::Serverbound::UseItemOn(_)) => sent.push("use_item_on"),
+                        Ok(play::Serverbound::UseItem(_)) => sent.push("use_item"),
+                        _ => {}
+                    }
+                }
+                assert!(game.using.is_none(), "z={z}");
+                (game.swings_started != swings, sent)
+            };
+            assert_eq!(click(game, 2), (true, vec!["use_item_on"]));
+            assert_eq!(click(game, 4), (false, vec!["use_item_on"]));
+            assert_eq!(click(game, 0), (false, vec!["use_item_on"]));
+            // On cooldown the block use itself passes.
+            game.cooldowns
+                .add(sunrise_client::cooldowns::group(&crystal, None), 20);
+            aim(game, 2);
+            assert!(!game.remote_use_block(Hand::Main));
+        });
+    }
 }
 
 #[cfg(test)]
@@ -15007,6 +15147,8 @@ mod movement_input_tests;
 #[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;
+#[cfg(test)]
+mod rider_tick_tests;
 #[cfg(test)]
 mod item_use_tick_tests {
     use mod_api::{Flow, Hooks, HostSide, LivingEntityUseItemTickEvent, ModEntry, Mods};

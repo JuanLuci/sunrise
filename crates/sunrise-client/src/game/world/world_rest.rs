@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) fn load_world_rest(
     resource_root: &sunrise_assets::resource_source::ResourceRoot,
+    conditions: &sunrise_world::conditions::LoadConditions,
     resources: &Resources,
     assets: &Assets,
     behaviour_json: &serde_json::Value,
@@ -28,10 +29,8 @@ pub(super) fn load_world_rest(
         .files
         .into_iter()
         .collect::<Vec<_>>();
-    let inventory = sunrise_mod_package::enabled::EnabledMods::read(root)?;
-    let conditions = sunrise_world::conditions::LoadConditions::new(inventory.server_ids());
     let overlay = &sunrise_world::loot::PackOverlay {
-        conditions: &conditions,
+        conditions,
         files: &files,
     };
     progress.set(6);

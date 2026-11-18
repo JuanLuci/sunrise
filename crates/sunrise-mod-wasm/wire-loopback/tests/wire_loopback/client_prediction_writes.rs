@@ -22,7 +22,7 @@ fn a_client_prediction_refuses_server_commands_by_name() {
     let previous = LOOPBACK_TRANSPORT.with(|transport| transport.borrow().clone());
     let _restore = TransportScope(previous);
     guest::set_transport(Some(Rc::new(move |id, bytes| {
-        if id == mod_api::wire::HOST_LOG {
+        if id.starts_with("protocol:log#") {
             return Vec::new();
         }
         let mut out = Writer::new();

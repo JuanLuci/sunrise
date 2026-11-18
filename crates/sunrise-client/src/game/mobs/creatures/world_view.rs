@@ -21,7 +21,7 @@ impl Game<'_> {
             attributes: &self.motion.attributes,
             movement: &self.motion.blocks,
             collision: self.collision,
-            suffocation: self.mob_suffocation(),
+            suffocation: self.level_suffocation(),
             data: self.res.mob_data(),
             controlling_player_movement: None,
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),

@@ -52,6 +52,13 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
                 .map(|value| push_reaction(value).0),
             occludes: self.occludes,
             destroy_overlay: self.destroy_overlay,
+            offset: self.offset.map(|mode| match mode {
+                mod_api::OffsetType::None => engine::OffsetType::None,
+                mod_api::OffsetType::Xz => engine::OffsetType::Xz,
+                mod_api::OffsetType::Xyz => engine::OffsetType::Xyz,
+            }),
+            max_horizontal_offset: self.max_horizontal_offset,
+            max_vertical_offset: self.max_vertical_offset,
         })
     }
 }
@@ -397,6 +404,51 @@ mod tests {
             assert_eq!(result.collision_context_shapes[&kind].default, boxes);
         }
         assert_eq!(result.interaction_shapes.unwrap().default, boxes);
+    }
+
+    #[test]
+    fn offset_declarations_share_json_values_and_admission_refusals() {
+        for (mode, json) in [
+            (mod_api::OffsetType::None, "NONE"),
+            (mod_api::OffsetType::Xz, "XZ"),
+            (mod_api::OffsetType::Xyz, "XYZ"),
+        ] {
+            let draft = BlockProperties {
+                offset: Some(mode),
+                max_horizontal_offset: Some(0.125),
+                max_vertical_offset: Some(0.1),
+                ..Default::default()
+            };
+            let expected: engine::BlockProperties = serde_json::from_str(&format!(
+                r#"{{"offset":"{json}","max_horizontal_offset":0.125,"max_vertical_offset":0.1}}"#
+            ))
+            .unwrap();
+            assert_eq!(draft.try_into_engine(&()).unwrap(), expected);
+        }
+        for (horizontal, vertical, key) in [
+            (f32::NAN, 0.0, "max_horizontal_offset"),
+            (f32::INFINITY, 0.0, "max_horizontal_offset"),
+            (-0.1, 0.0, "max_horizontal_offset"),
+            (0.3, 0.0, "max_horizontal_offset"),
+            (0.25, 0.3, "max_vertical_offset"),
+        ] {
+            let mut block = Block::new("test:offset", "minecraft:stone");
+            block.properties = BlockProperties {
+                offset: Some(mod_api::OffsetType::Xyz),
+                max_horizontal_offset: Some(horizontal),
+                max_vertical_offset: Some(vertical),
+                ..Default::default()
+            };
+            let mut content = sunrise_mod_package::Content::declared("test");
+            let error = content
+                .declare(&[block.try_into_engine(&()).unwrap()], &[])
+                .unwrap_err();
+            assert!(
+                error.contains("test:offset") && error.contains(key),
+                "{error}"
+            );
+            assert!(content.blocks.is_empty());
+        }
     }
 
     #[test]

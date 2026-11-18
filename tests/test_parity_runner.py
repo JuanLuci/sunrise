@@ -221,6 +221,24 @@ class ParityRunnerTests(unittest.TestCase):
         self.assertEqual(parity.named_only({}), {})
         self.assertIn("lan_integration", parity.named_only(parity.host_config()))
 
+    def test_the_daily_set_is_every_harness_except_named_only_and_their_shards(self):
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.object(parity, "load_state", return_value={"hashes": {}, "harnesses": {}}), \
+                mock.patch.object(parity, "save_state"), mock.patch.object(parity, "exit_on_termination"), \
+                mock.patch.object(parity, "environment_key", return_value="test"), \
+                mock.patch.object(parity, "platform_skips", return_value={}), mock.patch("builtins.print"):
+            manifest = Path(temp, "selection.json")
+            found = parity.harnesses()
+            names = parity.named_only(parity.host_config())
+            self.assertLessEqual({"frame_identity", "arrow_mob_permission", "command_exec"}, names.keys())
+            expected = {name for name in found if parity.base_name(name) not in names}
+            for args, selected in ((["--all", "--skip-named-only"], expected), (["--all"], set(found)),
+                                   (["frame_identity"], {"frame_identity"})):
+                with self.subTest(args=args), mock.patch.object(
+                        sys, "argv", ["parity.py", *args, "--list", "--selection-file", str(manifest)]):
+                    self.assertEqual(parity.main(), 0)
+                    self.assertEqual(set(json.loads(manifest.read_text())), selected)
+
     def test_a_pass_from_another_worktree_counts_only_for_the_same_content(self):
         with tempfile.TemporaryDirectory() as temp:
             elsewhere, here, shared = Path(temp, "a"), Path(temp, "b"), Path(temp, "shared")

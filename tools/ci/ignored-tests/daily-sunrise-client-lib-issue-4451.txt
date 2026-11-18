@@ -40,6 +40,9 @@ sunrise-client-lib menu::place::custom::tests::full_inventory_refuses_unchanged_
 sunrise-client-lib menu::place::custom::tests::ingredient_shortage_returns_old_inputs_but_never_fills_fuel_or_output lib daily resources
 sunrise-client-lib menu::place::custom::tests::noncontiguous_roles_place_one_increment_and_max_without_granting_a_result lib daily resources
 sunrise-client-lib menu::place::custom::tests::per_slot_caps_limit_max_and_policy_refusal_is_not_a_missing_ingredient_ghost lib daily resources
+sunrise-client-lib menu::tests::dfa::a_clients_crafting_grid_works_out_no_result lib daily resources
+sunrise-client-lib menu::tests::dfa::a_clients_smithing_table_works_out_no_result lib daily resources
+sunrise-client-lib menu::tests::dfa::a_clients_stonecutter_crafts_what_the_server_shows_once lib daily resources
 sunrise-client-lib menu::tests::dfa::dfa_baseline_recipe_placement lib daily resources
 sunrise-client-lib menu::tests::dfa::dfa_baseline_recipe_take_consumes_one_per_cell lib daily resources
 sunrise-client-lib mobs::ai::bed_wake_tests::loaded_sleeping_position_refreshes_in_actual_mob_tick lib daily resources

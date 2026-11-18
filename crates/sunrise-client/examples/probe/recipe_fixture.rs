@@ -49,11 +49,17 @@ pub fn main() -> sunrise_client::Result<()> {
                 match recipes.find(crate::test_resources::server_loop_context(), &grid, n) {
                     None => "none".to_owned(),
                     Some((id, result)) => {
-                        let rest = recipes.remainders(id, &grid, n, &|s| {
-                            sunrise_client::crafting::CraftingRemainder::crafting_remainder(
-                                &items, s,
-                            )
-                        });
+                        let rest = recipes.remainders(
+                            crate::test_resources::server_loop_context(),
+                            id,
+                            &grid,
+                            n,
+                            &|s| {
+                                sunrise_client::crafting::CraftingRemainder::crafting_remainder(
+                                    &items, s,
+                                )
+                            },
+                        );
                         let rest: Vec<String> = rest
                             .iter()
                             .enumerate()

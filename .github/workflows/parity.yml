@@ -1,114 +1,155 @@
-name: parity
-# The vanilla harnesses a pull request's changes can affect, on the Mac mini's runner or playsunrise's, which hold the
-# maintainer's own Minecraft files (Sunrise never downloads the game). Called by ci.yml for pull requests from this repository
-# and by run-parity.yml when a maintainer labels a fork's pull request run-parity. See docs/release-flow.md.
+name: vanilla parity
+# Called only by the daily on the main head it started on. Harness output and vanilla data stay on the runner.
 on:
   workflow_call:
     inputs:
-      base:
-        description: The pull request's base commit (the harnesses its changes since then can affect)
+      commit:
+        description: The commit to test
         type: string
         required: true
-      head:
-        description: The commit to check out and test
-        type: string
-        required: true
-      full:
-        description: >-
-          The pull request carries the full-parity label (a change every harness reaches, such as a crate split): it
-          runs on playsunrise's runner only, so the Mac mini's runners stay free for the others. While that runner is
-          busy the job waits for it.
-        type: boolean
-        default: false
-      frame_identity:
-        description: >-
-          The pull request carries the frame-identity label: it must leave the picture alone (HDR, shader packs), so
-          the frame_identity harness, which no automatic selection picks, runs too.
-        type: boolean
-        default: false
+defaults:
+  run:
+    shell: bash
 permissions:
   contents: read
 env:
-  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   SUNRISE_TELEMETRY_URL: "off"
 jobs:
-  parity:
-    runs-on: ${{ inputs.full && fromJSON('["self-hosted", "sunrise-game", "playsunrise"]') || fromJSON('["self-hosted", "sunrise-game"]') }}
-    # A change to core crates reruns ~350 harnesses: ~60-90 min on the Mac mini; on playsunrise (4 of its 8 vCPUs, 4
-    # harnesses at a time) up to a few hours, and any pull request's job may land there.
-    timeout-minutes: ${{ inputs.full && 360 || 180 }}
+  vanilla-parity:
+    runs-on: dyna-large
+    # Run four harnesses at a time; a Dyna runner ends at 6 h.
+    timeout-minutes: 330
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - name: Start a fresh private log directory for this attempt
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          root="${DYNA_CI_BUILD:?}/parity-keep"
+          mkdir -p "$root"
+          dir="$root/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rm -rf -- "$dir"
+          mkdir "$dir"
+          printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$COMMIT" > "$dir/scope"
+          echo "PARITY_LOG_DIR=$dir" >> "$GITHUB_ENV"
+          find "$root" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf {} +
+      - uses: actions/checkout@v4
         with:
-          # The commit the event names: a fork's later pushes need another run-parity label. The next step merges
-          # main into it.
-          ref: ${{ inputs.head }}
-          fetch-depth: 0
+          ref: ${{ inputs.commit }}
           persist-credentials: false
-          # Keeps .local/ (parity state, probe builds, oracle results) and target/ between runs.
-          clean: false
-      - name: The head merged into main (what merging it would land)
-        id: merge
-        env:
-          BASE_SHA: ${{ inputs.base }}
-          HEAD_SHA: ${{ inputs.head }}
+      - name: Check Dyna dependencies (install fallback without root)
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Install Rust toolchain
         run: |
-          # Harness fixes and game fixes that reached main since the branch was made then apply here too: a head
-          # tested alone failed harnesses already fixed on main (server_knockback before #2114, mob_ai's heap before
-          # #2270, save_roundtrip before #2212). Selection then compares with this main, so it sees only the pull
-          # request's own changes. A head that conflicts with main is tested alone.
-          set -euo pipefail
-          git merge --abort 2>/dev/null || true
-          git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          main=$(git rev-parse origin/main)
-          if git -c user.name=parity -c user.email=parity@localhost merge -q --no-edit --no-ff "$main" >/dev/null 2>&1; then
-            echo "base=$main" >> "$GITHUB_OUTPUT"
-            echo "Tested: head ${HEAD_SHA:0:9} merged into main ${main:0:9}" | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            git merge --abort
-            echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
-            echo "::warning::head ${HEAD_SHA:0:9} conflicts with main ${main:0:9}: tested alone, without main's fixes"
-            echo "Tested: head ${HEAD_SHA:0:9} alone (it conflicts with main ${main:0:9})" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
-      - name: The pinned Rust (tools/ci/rust-version)
-        id: rust
-        shell: bash
-        run: echo "version=$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
+          bash tools/ci/rustup_install.sh --profile minimal
+      - uses: actions/setup-java@v4
         with:
-          toolchain: ${{ steps.rust.outputs.version }}
-      - name: Tools from the runner
-        run: bash tools/ci/runner-env.sh
-      - name: Vanilla data, and resources prepared by this preparer
-        run: bash tools/ci/vanilla-data.sh
-      - name: The prepared output is the one the preparer's OUTPUT_VERSION says
-        env:
-          BASE_SHA: ${{ steps.merge.outputs.base }}
+          distribution: temurin
+          java-version: '25'
+      # Every job that builds in this runner's persistent target keeps its source snapshot true: a
+      # build of another tree without it left artifacts that a later job judged fresh (stale generated
+      # sources, 2026-11-13). Only byte-identical Git objects regain their previous timestamps.
+      - name: Restore unchanged source timestamps
+        run: python3 tools/ci/source_mtimes.py "${CARGO_TARGET_DIR:-target}/ci-source-mtimes-v2.json"
+      # Every build and test in this job runs at the runner's size, not the host's (tools/ci/cargo_jobs.py).
+      - name: Cap build parallelism to the runner
+        run: python3 tools/ci/cargo_jobs.py --job-mib 3072 --cap
+      - name: Set up disk-backed parity scratch and prepared vanilla data
         run: |
-          # A head made before OUTPUT_VERSION (#1947) that conflicts with main has neither the tool nor the number.
-          if [ ! -f tools/prepare_output.py ] || ! grep -q OUTPUT_VERSION crates/sunrise-prepare/src/lib.rs; then
-            echo "This head's preparer has no OUTPUT_VERSION: nothing to check"
-            exit 0
+          rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          ln -s "$DYNA_CI_BUILD/parity-out" .local
+          # The probes' build folder (tools/parity.py's .local/parity-target) lives under the slot's persistent target,
+          # so a run rebuilds only what changed instead of the whole game from cold (a harness's own 900 s build limit
+          # ran out on that, 2026-11-16). The source snapshot step above keeps it true across trees.
+          mkdir -p "$CARGO_TARGET_DIR/parity"
+          ln -s "$CARGO_TARGET_DIR/parity" .local/parity-target
+          echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
+          # tools/parity.py keeps pass records beside .local/minecraft, which is the read-only cache and holds
+          # other trees' passes: this run's records start empty, on the slot.
+          echo "PARITY_SHARED=$DYNA_CI_BUILD/parity-out/shared" >> "$GITHUB_ENV"
+          SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local \
+            bash tools/ci/vanilla-data.sh > "$PARITY_LOG_DIR/setup.log" 2>&1
+      # The game opens a window even with --offscreen, and the runner has no display: a virtual X display for every
+      # harness, started from this workflow and left running for the job.
+      - name: Virtual display
+        run: |
+          Xvfb -displayfd 3 -screen 0 1280x1024x24 -nolisten tcp 3> "$RUNNER_TEMP/xvfb-display" > /dev/null 2>&1 &
+          for _ in $(seq 60); do [ -s "$RUNNER_TEMP/xvfb-display" ] && break; sleep 0.5; done
+          [ -s "$RUNNER_TEMP/xvfb-display" ] || { echo "::error::Xvfb did not report a display within 30 seconds"; exit 1; }
+          echo "DISPLAY=:$(tr -d '[:space:]' < "$RUNNER_TEMP/xvfb-display")" | tee -a "$GITHUB_ENV"
+          echo "WAYLAND_DISPLAY=" >> "$GITHUB_ENV"
+      # Prebuild the probes under their time limits and compile the largest test binaries separately to fit memory.
+      - name: Build the daily harnesses' game probes
+        env:
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+          CARGO_PROFILE_RELEASE_INCREMENTAL: 'true'
+          CARGO_PROFILE_DEV_OPT_LEVEL: '3'
+        run: |
+          export CARGO_TARGET_DIR="$PWD/.local/parity-target"
+          exec > "$PARITY_LOG_DIR/game-probes.log" 2>&1
+          scripts=(tools/test_*_parity.py)
+          if grep -q "'--example', 'client_probe'" "${scripts[@]}"; then
+            cargo build --profile fast -p sunrise-client-lib --example client_probe
           fi
-          python3 tools/prepare_output.py check --cache --base "$BASE_SHA"
-      - name: The version constants are the pinned jar's
-        run: python3 tools/gen_version_consts.py --check
-      - name: The harnesses this change can affect
+          if grep -q "'sunrise-game', '-p', 'sunrise-client-lib', '--bins'" "${scripts[@]}"; then
+            cargo build --locked --profile fast -p sunrise-game -p sunrise-client-lib --bins
+          fi
+          if grep -Eq "[\"']sunrise-game[\"'], [\"']--bin[\"'], [\"']sunrise-client[\"']" "${scripts[@]}"; then
+            cargo build --profile fast -p sunrise-game --bin sunrise-client
+          fi
+          # The client lib tests harnesses run (`cargo test -p <package> --lib`, the dev profile as parity.py sets it),
+          # one at a time and before any oracle starts: one rustc of up to 12 GiB each, which a 16 GiB runner
+          # killed beside the harnesses (signal 9: mount_control and damage_catalog on main, 2026-11-16).
+          for package in sunrise-client-lib sunrise-client; do
+            if grep -Eq "[\"']test[\"'], ([\"']--locked[\"'], )?[\"']-p[\"'], [\"']$package[\"'], [\"']--lib[\"']" "${scripts[@]}"; then
+              cargo test --locked --no-run -p "$package" --lib
+            fi
+          done
+      - name: Build parity probes
+        run: |
+          exec > "$PARITY_LOG_DIR/probes.log" 2>&1
+          cargo build --release --bin sunrise-parity
+          cargo build --release --bin sunrise-tick-parity
+          cargo build --release --bin sunrise-geometry-parity
+          cargo build --release --bin sunrise-noise-parity
+          cargo build --release --bin sunrise-density-parity
+          cargo build --release --bin sunrise-worldgen-parity
+          cargo build --release --bin sunrise-float-log-parity
+          cargo build --release -p sunrise-core --example generation_tick_fixture
+          cargo build --release -p sunrise-core --example biome_zoom_fixture
+          cargo build --release -p sunrise-world --bin sunrise-world --example world_probe
+          cargo build --release -p sunrise-world --example world_probe
+      - name: Run every automatic harness
         env:
           PARITY_HOSTS: ''
-          BASE_SHA: ${{ steps.merge.outputs.base }}
-        run: python3 tools/parity.py --changed "$BASE_SHA" --timeout 2400  # world_spawn takes ~1480 s on a busy runner
-      - name: The pictures this change must leave alone
-        if: ${{ !cancelled() && inputs.frame_identity }}
-        env:
-          PARITY_HOSTS: ''
-          BASE_SHA: ${{ steps.merge.outputs.base }}
-        run: python3 tools/parity.py frame_identity --timeout 2400
-      - name: Logs of the failed harnesses
-        if: failure()
-        uses: actions/upload-artifact@v7
+        run: |
+          # The runner writes retry reasons to the step summary as well as stdout; keep both private.
+          export GITHUB_STEP_SUMMARY="$RUNNER_TEMP/parity-private-summary"
+          log="$PARITY_LOG_DIR/parity.log"
+          status=0
+          python3 tools/parity.py --all --skip-named-only -j 4 --timeout 2400 \
+            --selection-file "$PARITY_LOG_DIR/selection.json" \
+            > "$log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$PARITY_LOG_DIR/exit"
+          echo "Parity exited $status"
+          exit "$status"
+      # Only names and outcomes go to the daily summary. Keep setup and harness logs on the runner slot.
+      - name: Write the harnesses' verdict
+        if: always()
+        run: |
+          [ -n "${PARITY_LOG_DIR:-}" ] || exit 0  # setup did not initialise this attempt
+          python3 tools/ci/parity_verdict.py "$PARITY_LOG_DIR" "$RUNNER_TEMP/parity.json"
+      - name: Upload the harnesses' verdict
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: parity-logs
-          path: .local/parity-runner/logs/
+          name: daily-report-parity-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/parity.json
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 7

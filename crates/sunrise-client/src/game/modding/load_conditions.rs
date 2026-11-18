@@ -262,6 +262,10 @@ pub(super) fn conditions_for_mods(
 }
 
 #[cfg(test)]
+#[path = "load_conditions/startup_tests.rs"]
+mod startup_tests;
+
+#[cfg(test)]
 #[path = "load_conditions/tests.rs"]
 mod tests;
 

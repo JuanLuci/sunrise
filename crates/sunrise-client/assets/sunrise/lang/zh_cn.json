@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "视图",
   "sunrise.studio.topbar.view_short": "视图",
   "sunrise.studio.unknown_server": "未知",
-  "sunrise.tempban.dedicated_required": "临时封禁需要专用服务器",
-  "sunrise.tempban.invalid_duration": "%s 不是有效的时长：30m、12h、7d",
-  "sunrise.tempban.list.count": "共有 %s 条临时封禁：",
-  "sunrise.tempban.list.empty": "没有任何临时封禁",
-  "sunrise.tempban.list.entry": "%1$s 被 %2$s 封禁 %3$s（直到 %4$s）",
-  "sunrise.tempban.success": "%1$s，时长 %2$s，直到 %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "与 Mojang 或 Microsoft 无关"
 }

@@ -64,7 +64,34 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     // tags and atlases, and to the convention tags mods share.
     let shared = matches!(namespace, "minecraft" | "c");
     let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
-    let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
+    let mut extension = false;
+    if top == "data" && namespace == "sunrise" && rest.starts_with("tags/") {
+        let tag = rest
+            .strip_prefix("tags/")
+            .and_then(|s| s.strip_suffix(".json"));
+        if tag.is_some_and(|t| {
+            t.split_once('/')
+                .is_some_and(|(_, path)| path.starts_with("class/"))
+        }) {
+            return Err(format!(
+                "{name}: sunrise:class/* tags are generated; attach a part through block_part_tag instead"
+            ));
+        }
+        extension = tag
+            .and_then(|t| t.split_once('/'))
+            .is_some_and(|(registry, path)| {
+                crate::extension_tags::ALL.iter().any(|tag| {
+                    tag.registry == registry && tag.id.strip_prefix("sunrise:") == Some(path)
+                })
+            });
+        if !extension {
+            return Err(format!(
+                "{name}: not a declared Sunrise extension tag; see the SDK extension_tags list and the book's extension tags reference (mod professions use secondary_blocks)"
+            ));
+        }
+    }
+    let allowed =
+        owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas || extension;
     if !allowed {
         return Err(format!(
             "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
@@ -123,12 +150,56 @@ pub struct BlockProperties {
     #[serde(default, deserialize_with = "deserialize_push_reaction")]
     pub push_reaction: Option<PushReaction>,
     /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
-    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    /// it (`BlockBehaviour.Properties.noOcclusion`); `true`: occludes whatever the template
+    /// does, using the declared outline or the template's published occlusion shape. Unset
+    /// inherits the template.
     pub occludes: Option<bool>,
     /// `false`: the breaking crack (`destroy_stage_0..9`) is not drawn on the block, as for a
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Per-column model offset and translation of declared outline, collision and interaction shapes.
+    /// Block-entity published shapes remain as published. Unset inherits the template.
+    #[serde(default, deserialize_with = "deserialize_offset")]
+    pub offset: Option<OffsetType>,
+    /// Maximum horizontal displacement, 0 to 0.25 (default 0.25 for an explicit offset mode).
+    #[serde(default, deserialize_with = "deserialize_horizontal_offset")]
+    pub max_horizontal_offset: Option<f32>,
+    /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
+    #[serde(default, deserialize_with = "deserialize_vertical_offset")]
+    pub max_vertical_offset: Option<f32>,
+}
+
+/// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum OffsetType {
+    None,
+    Xz,
+    Xyz,
+}
+
+fn offset_float<'de, D: serde::Deserializer<'de>>(
+    d: D,
+    key: &str,
+) -> Result<Option<f32>, D::Error> {
+    Option::<f32>::deserialize(d).map_err(|e| serde::de::Error::custom(format!("{key}: {e}")))
+}
+fn deserialize_horizontal_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_horizontal_offset")
+}
+fn deserialize_vertical_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_vertical_offset")
+}
+fn deserialize_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<OffsetType>, D::Error> {
+    Option::<OffsetType>::deserialize(d)
+        .map_err(|e| serde::de::Error::custom(format!("offset: {e}")))
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -1645,6 +1716,14 @@ fn check_block(file: &Block) -> Result<(), String> {
             ));
         }
     }
+    for (key, value, max) in [
+        ("max_horizontal_offset", p.max_horizontal_offset, 0.25),
+        ("max_vertical_offset", p.max_vertical_offset, 0.2),
+    ] {
+        if value.is_some_and(|v| !v.is_finite() || !(0.0..=max).contains(&v)) {
+            return Err(format!("{key} is a finite number from 0 to {max}"));
+        }
+    }
     let finite = |v: Option<f32>| v.is_none_or(f32::is_finite);
     if !finite(p.hardness) || !finite(p.explosion_resistance) || !finite(p.friction) {
         return Err("hardness, explosion_resistance and friction are numbers".into());
@@ -2803,6 +2882,23 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn block_offset_refusals_name_the_file_and_key() {
+        for (properties, key) in [
+            (r#""offset":"XY""#, "offset"),
+            (r#""max_horizontal_offset":-0.1"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":0.3"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":"wide""#, "max_horizontal_offset"),
+            (r#""max_vertical_offset":0.3"#, "max_vertical_offset"),
+        ] {
+            let json = format!(r#"{{"template":"minecraft:stone","properties":{{{properties}}}}}"#);
+            let file = "data/ruby/sunrise/block/offset.json";
+            let error =
+                smod("offset-refusal", MANIFEST_TEXT, &[(file, json.as_bytes())]).unwrap_err();
+            assert!(error.contains(file) && error.contains(key), "{error}");
+        }
+    }
+
+    #[test]
     fn blocks_choose_vanilla_push_reactions() {
         for name in ["PUSH_PULL", "PUSH", "POPPED", "IMMOVEABLE", "IGNORE_ENTITY"] {
             let text = format!(
@@ -3630,6 +3726,40 @@ capabilities = ["registries"]
                 &[("data/ruby/sunrise/block/a.json", block.as_bytes())],
             );
             assert!(e.contains(why), "{case}: {e}");
+        }
+    }
+
+    #[test]
+    fn reserved_namespace_accepts_only_declared_extension_tags() {
+        for tag in crate::extension_tags::ALL {
+            let path = format!(
+                "data/sunrise/tags/{}/{}.json",
+                tag.registry,
+                tag.id.strip_prefix("sunrise:").unwrap()
+            );
+            let content = smod(
+                "extension",
+                MANIFEST_TEXT,
+                &[(path.as_str(), br#"{"values":[]}"#)],
+            )
+            .unwrap();
+            assert_eq!(content.files.len(), 1);
+        }
+        for (path, hint) in [
+            (
+                "data/sunrise/tags/block/villager_secondary_poi/custom.json",
+                "secondary_blocks",
+            ),
+            (
+                "data/sunrise/tags/item/villager_secondary_poi/farmer.json",
+                "extension_tags",
+            ),
+            ("data/sunrise/tags/block/class/crop.json", "block_part_tag"),
+            ("data/sunrise/loot_table/a.json", "own namespaces"),
+            ("assets/sunrise/lang/en_us.json", "own namespaces"),
+        ] {
+            let error = smod("extension-refused", MANIFEST_TEXT, &[(path, b"{}")]).unwrap_err();
+            assert!(error.contains(path) && error.contains(hint), "{error}");
         }
     }
 

@@ -6,6 +6,9 @@ pub trait Hooks {
     /// name and before its components' (enchantments, lore, attributes). Add
     /// lines to `lines`, which arrives empty, each with a colour as `rgba` packs
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
+    /// `context` is the same [`TooltipAppendContext`] passed to component appenders:
+    /// player, advanced/creative/nested flags and vanilla `Item.TooltipContext.tickRate()`
+    /// (the client level's rate, or 20 without a level).
     /// The stack has its components (`stack.data()`). Asked each frame the
     /// tooltip shows, never for one the stack hides or a crossbow's loaded
     /// projectile. NeoForge's `ItemTooltipEvent` is the corresponding line-building event;

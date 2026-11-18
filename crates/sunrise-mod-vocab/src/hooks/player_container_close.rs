@@ -2,7 +2,7 @@
 // catalog-order: 0164
 
 pub trait Hooks {
-    /// `player` (`name`) closed the menu `player_container_open` told
+    /// `player` (`name`) closed the `menu_type` that `player_container_open` told
     /// of (NeoForge's `PlayerContainerEvent.Close`, posted in
     /// `ServerPlayer.doCloseContainer` after the menu's `removed`): they
     /// closed it, walked out of reach, died, changed level, or another menu

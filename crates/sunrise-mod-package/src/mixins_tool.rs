@@ -1,7 +1,8 @@
 //! The horizon-mixins tool the launcher runs for `[[native.mixin]]` builds: the pinned source
-//! ([`REV`]), the one change carried on it until upstream takes it ([`PATCH`], which narrows the
-//! tool's "calls beneath a reference" rule from the whole function to the site a hook rewrites),
-//! and the names of its prebuilt release. `.github/workflows/prebuilt-mixins-tool.yml` builds and
+//! ([`REV`]), the changes carried on it until upstream takes them ([`PATCH`]: it narrows the
+//! tool's "calls beneath a reference" rule from the whole function to the site a hook rewrites,
+//! and compares binding types as parsed types, so `Vec<T,>` and `Vec<T>` match), and the names of
+//! its prebuilt release. `.github/workflows/prebuilt-mixins-tool.yml` builds and
 //! publishes it through `xtask mixins-tool`; the launcher downloads it, or builds the same
 //! patched source where no prebuilt exists.
 

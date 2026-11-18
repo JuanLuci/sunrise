@@ -376,6 +376,31 @@ impl ChunkDecoder {
         }
         Next::Decoding
     }
+
+    /// [`Self::next`], waiting up to `timeout` for the oldest packet's column:
+    /// a tick about to run takes every chunk that came before it, as vanilla's
+    /// handles every packet before its tick.
+    pub(super) fn wait_next(&self, timeout: std::time::Duration) -> Next {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match self.next() {
+                Next::Decoding => {}
+                other => return other,
+            }
+            let mut ret = match self.retirement.lock() {
+                Ok(r) => r,
+                Err(_) => return Next::Lost,
+            };
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match ret.done.recv_timeout(left) {
+                Ok(res) => {
+                    ret.ready.insert(res.seq, (res.packet, res.column));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => return Next::Decoding,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Next::Lost,
+            }
+        }
+    }
 }
 
 impl Drop for ChunkDecoder {
@@ -674,6 +699,35 @@ mod tests {
             assert_eq!((column.x, column.z), (x, -3));
         }
         assert!(matches!(decoder.next(), Next::Decoding));
+    }
+
+    /// A tick about to run waits for each column still decoding instead of
+    /// leaving it for the next frame: every packet comes back in order, and
+    /// with none left the wait ends as `Decoding`.
+    #[test]
+    fn a_tick_waits_for_each_column_in_order() {
+        let overworld = DimensionType::vanilla("minecraft:overworld");
+        let format = Arc::new(ChunkFormat::new(&overworld, vec![0, 7, 9], 2));
+        let decoder = ChunkDecoder::new();
+        for x in 0..32 {
+            assert!(decoder.submit(format.clone(), packet(x, 1 + x)).is_none());
+        }
+        for x in 0..32 {
+            let Next::Ready((packet, column)) =
+                decoder.wait_next(std::time::Duration::from_secs(10))
+            else {
+                panic!("column {x} did not come");
+            };
+            let C::LevelChunkWithLight(p) = *packet else {
+                panic!("not a chunk packet");
+            };
+            assert_eq!(p.x, x);
+            assert_eq!(column.unwrap().get(5, 70, 9), 1 + x as u32);
+        }
+        assert!(matches!(
+            decoder.wait_next(std::time::Duration::from_millis(1)),
+            Next::Decoding
+        ));
     }
 
     /// `LevelChunk.replaceBiomes`: the packet's containers go to the

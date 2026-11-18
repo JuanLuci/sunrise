@@ -623,21 +623,21 @@ class PrReadyTests(unittest.TestCase):
         self.assertIn("--changed-files", steps[-1].command)
         self.assertIn("crates/sunrise-world/src/food.rs", steps[-1].command)
 
-    def test_harnesses_run_only_where_ci_s_parity_job_would(self):
+    def test_the_local_self_check_runs_harnesses_when_their_tools_change(self):
         packages = {"sunrise-world": "crates/sunrise-world"}
         code = {"crates/sunrise-world/src/food.rs"}
         self.assertFalse(pr_ready.runs_parity(code))
         for path in ("tools/test_food_parity.py", "tools/parity.py", "tools/lab.py", "tools/parity_hosts.json",
                      "mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaFoodOracle.java",
                      "crates/sunrise-world/examples/food_probe.rs", "crates/sunrise-client/src/game/sculk_fixture.rs",
-                     ".github/workflows/parity-main.yml"):
+                     ".github/workflows/parity.yml"):
             with self.subTest(path=path):
                 self.assertTrue(pr_ready.runs_parity(code | {path}))
         with mock.patch.object(pr_ready, "affected_here", return_value=["food", "light"]):
             steps = pr_ready.plan(args(host="macmini"), "origin/main", code, packages, {"sunrise-world"}, {})
             self.assertEqual(steps[-1].status, "list")
             self.assertIsNone(steps[-1].command)
-            self.assertIn("2 affected, left to parity-main on main", steps[-1].detail)
+            self.assertIn("2 affected, left to the daily on main", steps[-1].detail)
             self.assertIn("--harnesses runs them here", steps[-1].detail)
             steps = pr_ready.plan(args(host="macmini"), "origin/main", code | {"tools/test_food_parity.py"}, packages,
                                   {"sunrise-world"}, {})

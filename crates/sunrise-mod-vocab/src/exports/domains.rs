@@ -23,8 +23,8 @@ pub use item::types::*;
 pub(crate) use runtime::TEST_MODS;
 pub use runtime::{Flow, ModEntry, Mods, subscribed_by};
 pub(crate) use runtime::{
-    entered, entered_parts, entered_with_id, install, listened, mark_mod, mod_index_on, mods,
-    set_mod_enabled,
+    any_mod_disabled, disabled_owner_part, entered, entered_parts, entered_with_id, install,
+    listened, mark_mod, mod_index_on, mods, set_mod_enabled,
 };
 pub use world::types::*;
 #[doc(hidden)]

@@ -294,7 +294,7 @@ impl Game<'_> {
                 ) * glam::Mat4::from_rotation_y(vault.display_spin(alpha as f32).to_radians());
             let light = self.world.light(key.0, key.1, key.2);
             let seed =
-                i64::from(self.pack.item_renderer.item_id(&stack.item)) + i64::from(stack.damage);
+                i64::from(self.item_number(&stack.item).unwrap_or(0)) + i64::from(stack.damage);
             for copy in item_render::cluster_poses(
                 &state,
                 pose,

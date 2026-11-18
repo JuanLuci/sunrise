@@ -24,8 +24,8 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 3;
-const FILE_NAME: &str = "behaviours-v3.bin";
+const VERSION: u32 = 4;
+const FILE_NAME: &str = "behaviours-v4.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
@@ -68,6 +68,7 @@ struct Fact {
     push: u8,
     instrument: u8,
     shape: i32,
+    collision_offset: Option<(f32, f32)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -446,6 +447,7 @@ impl Snapshot {
                 push: push_index(fact.push),
                 instrument: fact.instrument,
                 shape: fact.shape,
+                collision_offset: fact.collision_offset,
             })
             .collect();
         let shapes = behaviours
@@ -626,6 +628,12 @@ impl Snapshot {
                 if wire.shape < -1 || wire.shape >= shapes.len() as i32 {
                     return Err(invalid("cached shape index out of range"));
                 }
+                if wire
+                    .collision_offset
+                    .is_some_and(|limits| !crate::collision::valid_offset_limits(limits))
+                {
+                    return Err(invalid("invalid cached collision offset limits"));
+                }
                 let fluid_kind = FluidKind::from_tick_id(wire.fluid_kind.into())
                     .ok_or_else(|| invalid("cached fluid kind out of range"))?;
                 let fluid = registry
@@ -651,6 +659,7 @@ impl Snapshot {
                     )?),
                     instrument: wire.instrument,
                     shape: wire.shape,
+                    collision_offset: wire.collision_offset,
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;

@@ -502,7 +502,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     sup!()
                 } else {
                     let other = self.rel_state(pos, dir.opposite());
-                    let in_wall = b.in_set(nstate, &t.walls) || b.in_set(other, &t.walls);
+                    let in_wall = self.fence_gate_in_wall(nstate) || self.fence_gate_in_wall(other);
                     table.set_bool(state, p.in_wall, in_wall)
                 }
             }
@@ -979,6 +979,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             vanilla,
         )
     }
+    /// The neighbour decides only the gate's wall height, not wall connections.
+    pub(crate) fn fence_gate_in_wall(&self, state: BlockStateId) -> bool {
+        self.level
+            .fence_gate_in_wall(state)
+            .unwrap_or_else(|| self.b.in_set(state, &self.b.tags.walls))
+    }
+
     /// `WallBlock.connectsTo` for the wall `wall` at `pos`, then the hook.
     pub(crate) fn wall_connects_to(
         &self,

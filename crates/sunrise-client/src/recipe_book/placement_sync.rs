@@ -2,8 +2,6 @@
 #[cfg(test)]
 #[path = "placement_sync_tests.rs"]
 mod tests;
-use mod_api::wire::Wire;
-use std::sync::OnceLock;
 
 pub const RESOURCE_ID_BYTES: usize = 32767;
 pub const CHUNK_BYTES: usize = super::settings_sync::MAX_BYTES / 2;
@@ -129,17 +127,24 @@ pub enum Frame {
     },
 }
 
-/// Includes the opaque catalogue body and fragmentation policy, not just frame fields.
+/// The number of this frame set and catalogue body: bump it when `Frame`, the catalogue's
+/// types (`mod_api::RecipeBookCategory`) or their encoding change. The fragmentation policy is
+/// mixed in below, so changing a limit changes the schema by itself. A daily test in
+/// `sunrise-mod-api-gen` (`the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries`)
+/// fails when those shapes change without a bump.
+const PROTOCOL: u64 = 1;
+
+/// What the client and the server must agree on before either sends a frame.
 pub fn schema() -> u64 {
-    static VALUE: OnceLock<u64> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let hash = mod_api::wire::layout_mix(
-            Frame::layout(&mut Vec::new()),
-            Vec::<mod_api::RecipeBookCategory>::layout(&mut Vec::new()),
-        );
-        let hash = mod_api::wire::layout_mix(hash, CHUNK_BYTES as u64);
-        let hash = mod_api::wire::layout_mix(hash, MAX_CATALOG_BYTES as u64);
-        mod_api::wire::layout_mix(hash, RESOURCE_ID_BYTES as u64)
+    [
+        PROTOCOL,
+        CHUNK_BYTES as u64,
+        MAX_CATALOG_BYTES as u64,
+        RESOURCE_ID_BYTES as u64,
+    ]
+    .into_iter()
+    .fold(0xcbf2_9ce4_8422_2325, |hash, word| {
+        (hash ^ word).wrapping_mul(0x0100_0000_01b3)
     })
 }
 

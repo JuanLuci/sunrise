@@ -43,6 +43,61 @@ fn a_client_reads_the_light_of_its_level() {
     });
 }
 
+/// The restricted level shares the handle's support/sky reads without loading chunks.
+#[test]
+#[ignore = "daily"]
+fn restricted_level_support_and_sky_reads() {
+    use mod_api::{BlockFace, LevelHost, SupportType};
+    use std::sync::Arc;
+    use sunrise_client::chunk::{Chunk, Light};
+    mod_platform::testing::with_mods(Default::default(), || {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let pos = [3, -60, 5];
+            let mut chunk = Chunk::empty(0, 0);
+            Arc::make_mut(&mut chunk.sections[0]).light = Light::Uniform(0xF0);
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(pos[0], pos[1], pos[2], stone).unwrap();
+            game.with_level(|_, level, _| {
+                for support in [SupportType::Full, SupportType::Center, SupportType::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(pos, BlockFace::Up, support),
+                        Some(true)
+                    );
+                    assert_eq!(
+                        level.block_face_sturdy([4, -60, 5], BlockFace::Up, support),
+                        Some(false)
+                    );
+                    assert_eq!(
+                        level.block_face_sturdy([32, -60, 5], BlockFace::Up, support),
+                        None
+                    );
+                }
+                assert_eq!(level.can_see_sky(pos), Some(true));
+                assert_eq!(level.can_see_sky([32, -60, 5]), None);
+                assert_eq!(level.can_see_sky([3, -1000, 5]), None);
+            });
+            assert!(!game.world.loaded(32, 5));
+            // Neither query needs synced server container contents on a client: it refuses.
+            game.options.dedicated = None;
+            game.options.execution_role = ExecutionRole::Client;
+            game.with_level(|_, level, _| {
+                assert_eq!(
+                    level.block_face_sturdy(pos, BlockFace::Up, SupportType::Rigid),
+                    None
+                );
+                assert_eq!(level.can_see_sky(pos), None);
+            });
+        });
+    });
+}
+
 /// A guest's sprinting is written to its row, so it survives the turn boundary the body is
 /// rebuilt at, and its speed modifier stays with the flag; a stale handle sets nothing.
 #[test]

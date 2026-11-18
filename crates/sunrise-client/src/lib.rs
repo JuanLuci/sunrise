@@ -17,3 +17,5 @@ pub mod entry;
 static ALLOCATOR: sunrise_threads::GameAllocator = sunrise_threads::GAME_ALLOCATOR;
 pub mod game;
 pub mod orb_limits;
+#[cfg(test)]
+mod test_game_dir;

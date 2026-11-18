@@ -387,7 +387,6 @@ sunrise-client-lib mod_content::tests::registered_conditions_tests::failed_condi
 sunrise-client-lib mod_content::tests::registered_conditions_tests::registered_conditions_select_content_root_tags_and_structure_modifiers lib daily resources
 sunrise-client-lib motion::exclusions::tests::an_excluded_block_has_no_inside_effect_and_its_neighbour_still_does lib daily resources
 sunrise-client-lib motion::tests::a_burning_player_melts_powder_snow lib daily resources
-sunrise-client-lib motion::tests::a_client_over_an_unloaded_chunk_falls_at_a_tenth lib daily resources
 sunrise-client-lib motion::tests::a_clients_own_fall_does_not_hurt_it lib daily resources
 sunrise-client-lib motion::tests::a_clients_own_glide_into_a_wall_plays_the_fall_sound_and_does_not_hurt_it lib daily resources
 sunrise-client-lib motion::tests::a_clients_player_takes_its_frost_from_the_server lib daily resources
@@ -403,6 +402,9 @@ sunrise-client-lib motion::tests::a_lava_cauldron_burns_the_player_inside_it lib
 sunrise-client-lib motion::tests::a_passenger_in_powder_snow_freezes_and_thaws lib daily resources
 sunrise-client-lib motion::tests::a_passenger_stops_swimming_and_stands lib daily resources
 sunrise-client-lib motion::tests::a_player_lands_on_a_block_a_piston_is_moving lib daily resources
+sunrise-client-lib motion::tests::a_riders_own_move_follows_the_fluid_it_is_in_now lib daily resources
+sunrise-client-lib motion::tests::a_riders_own_move_takes_this_ticks_look lib daily resources
+sunrise-client-lib motion::tests::a_player_over_an_unloaded_chunk_falls_under_gravity lib daily resources
 sunrise-client-lib motion::tests::a_riding_guest_keeps_no_swim_in_the_fluid_phase lib daily resources
 sunrise-client-lib motion::tests::a_riptide_spin_lies_flat_and_ends_on_the_first_entity_it_touches lib daily resources
 sunrise-client-lib motion::tests::a_server_client_glides_until_the_servers_flag_clears lib daily resources

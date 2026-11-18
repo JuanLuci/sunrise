@@ -149,7 +149,7 @@ windows-segment-heap = []
 workspace = true
 
 [dev-dependencies]
-sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-probe"] }
+sunrise-threads = { path = "../sunrise-threads", features = ["test-allocation-probe", "test-game-dir"] }
 sunrise-mod-wasm = { path = "../sunrise-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 mod_platform = { package = "sunrise-mod-api", path = "../sunrise-mod-api", features = ["testing"] }

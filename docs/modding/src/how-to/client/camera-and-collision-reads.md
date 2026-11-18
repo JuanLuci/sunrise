@@ -163,7 +163,8 @@ in distant terrain or return a block behind a targeted entity.
 
 A client `EntityRef` supports `bounding_box(host)`, `eye_height(host)` and
 `eye_position(host)`. For the local player these use the current predicted body and pose;
-for a tracked target they use the client's displayed body. Stale handles and entities the
+for a tracked target they use the client's displayed body. End crystals expose their 2 x 2 box;
+dragon parts expose their own box. Stale handles and entities the
 client cannot read return `None`.
 
 The local `PlayerRef` also supports `within_entity_reach(host, target, rule)`: it reads the

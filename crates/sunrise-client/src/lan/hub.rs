@@ -3583,6 +3583,10 @@ impl Hub {
                         if let Some(add) = first.recipe_book_add {
                             g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                         }
+                        // The game's own TICK trigger may have awarded these in the guest's
+                        // turn before this first tick: announced here, flush_advancements
+                        // must not send them again (vanilla awards them once).
+                        g.recipes_unlocked.retain(|id| !first.recipes.contains(id));
                         g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
                         g.advancements_visible = sync.advancements.visibility(&g.advancements);
                         g.advancements_changed.clear();
@@ -5290,6 +5294,7 @@ mod tests {
     mod effect_meta_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
+    mod first_tick_recipe_tests;
     mod live_player_limit_tests;
     mod ordered_inbox_tests;
     mod pending_move_bound_tests;

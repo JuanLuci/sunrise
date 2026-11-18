@@ -29,6 +29,14 @@ struct Scan {
 /// Uninstantiated generic types are excluded. Uses the module walk the generator uses too, including
 /// explicit module paths.
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
+    Ok(public_type_definitions(krate, lib)?.into_keys().collect())
+}
+
+/// [`public_types`] with the path each is defined at.
+pub fn public_type_definitions(
+    krate: &str,
+    lib: &Path,
+) -> Result<BTreeMap<String, String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
     let files = crate::modules::walk_module_files(
         krate.into(),
@@ -52,7 +60,7 @@ pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
             .iter()
             .map(|(module, file)| (module.as_str(), file.items.as_slice())),
     )?;
-    Ok(public.into_keys().collect())
+    Ok(public)
 }
 
 /// The crate's publicly reachable wire types, each public path with the path it is defined at,

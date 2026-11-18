@@ -103,24 +103,33 @@ impl MobWorld<'_> {
         let below = y.saturating_sub(1);
         f64::from(below) + self.collision_top(x, below, z)
     }
-    /// The block's collision top (0 for an empty shape), as `getFloorLevel` and
-    /// `MoveControl.tick` read it: for a state that takes its shapes from its block entity,
-    /// the published collision shape's, else the state's own (#1666).
+    /// The block's collision top (0 for an empty shape), as `getFloorLevel`,
+    /// `MoveControl.tick` and `EvokerAttackSpellGoal.createSpellEntity` read it: the shape
+    /// at this cell for published or displaced collision (#1666, #1710), else the state's
+    /// cached height.
     pub fn collision_top(&self, x: i32, y: i32, z: i32) -> f64 {
         let state = self.world.block(x, y, z);
-        if !self.collision.publishes_shapes(state) {
+        if !self.collision.has_positioned_collision(state) {
             return f64::from(self.data.state(state).top);
         }
+        self.bound_collision_shape(state, [x, y, z])
+            .filter(|shape| !shape.is_empty())
+            .map_or(0.0, |shape| shape.max(sunrise_core::geometry::Axis::Y))
+    }
+    /// `getCollisionShape(level, pos)` of `state` at `p` through the collision binding:
+    /// the shape its block entity publishes, else the declared one. None when the query
+    /// fails.
+    pub fn bound_collision_shape(
+        &self,
+        state: sunrise_world::registry::BlockStateId,
+        p: [i32; 3],
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
         let mut scene = crate::collisions::SceneCollisions {
             world: self.world,
             binding: self.collision,
             subject: None,
         };
-        self.collision
-            .collision_shape(&mut scene, state, [x, y, z])
-            .ok()
-            .filter(|shape| !shape.is_empty())
-            .map_or(0.0, |shape| shape.max(sunrise_core::geometry::Axis::Y))
+        self.collision.collision_shape(&mut scene, state, p).ok()
     }
 }
 

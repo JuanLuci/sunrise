@@ -1010,7 +1010,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::FenceGate => {
                 let open = self.has_neighbor_signal(pos);
-                let wall = |sim: &Self, d: Direction| b.in_set(sim.rel_state(pos, d), &t.walls);
+                let wall = |sim: &Self, d: Direction| sim.fence_gate_in_wall(sim.rel_state(pos, d));
                 let in_wall = match axis_of(horizontal) {
                     Axis::Z => wall(self, Direction::West) || wall(self, Direction::East),
                     _ => wall(self, Direction::North) || wall(self, Direction::South),

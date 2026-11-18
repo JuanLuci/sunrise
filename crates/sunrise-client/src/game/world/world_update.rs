@@ -48,7 +48,9 @@ impl Game<'_> {
         self.lod_level = None;
         let dim = self.dim;
         let source = match (&self.integrated, self.server_far_terrain(), &self.remote) {
-            (Some(server), ..) => server.call(move |game| game.lod_source_in(dim)).flatten(),
+            (Some(server), ..) => server
+                .ask(|reply| super::owner_link::OwnerRequest::LodSource(dim, reply))
+                .flatten(),
             (None, Some(offer), Some(remote)) => {
                 let states = self.res.facts().states.len() as u32;
                 let biomes = self.res.biomes().index.clone();

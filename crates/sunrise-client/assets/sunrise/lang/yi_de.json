@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "וויו",
   "sunrise.studio.topbar.view_short": "וויו",
   "sunrise.studio.unknown_server": "אומבאַקאַנט",
-  "sunrise.tempban.dedicated_required": "צײַטווייַליקע פֿאַרוואָרפֿונגען דאַרפֿן אַ דעדיקייטעד סערווער",
-  "sunrise.tempban.invalid_duration": "%s איז נישט קיין דויער: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "עס זענען %s צײַטווייַליקע פֿאַרוואָרפֿונג(ען):",
-  "sunrise.tempban.list.empty": "עס זענען נישטאָ קיין צײַטווייַליקע פֿאַרוואָרפֿונגען",
-  "sunrise.tempban.list.entry": "%1$s איז פֿאַרוואָרפֿן געוואָרן דורך %2$s %3$s (ביז %4$s)",
-  "sunrise.tempban.success": "%1$s פֿאַר %2$s, ביז %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "ניט אַפיליייטאַד מיט Mojang אָדער Microsoft"
 }

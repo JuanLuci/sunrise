@@ -15,6 +15,7 @@ pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "entity_velocity",
     "entity_rotation",
     "entity_head_yaw",
+    "entity_body_yaw",
     "entity_bounding_box",
     "entity_eye_height",
     "entity_eye_position",

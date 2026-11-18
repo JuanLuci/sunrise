@@ -3,7 +3,7 @@
 //! player through memory, so a world tick never holds up a frame.
 //!
 //! The window asks its server for what only the server knows (Open to LAN,
-//! the world's options) with [`Integrated::call`], as vanilla's client calls
+//! the world's options) with [`Integrated::ask`] and an `OwnerRequest`, as vanilla's client calls
 //! into its `IntegratedServer`.
 //!
 //! Every single-player world runs this way; LAN guests and dedicated servers
@@ -15,6 +15,7 @@ use super::{
         LanSettings, Owner,
         sync::{SyncPreload, preload_sync_data},
     },
+    owner_link::{OwnerRequest, Reply},
     world_loading::{WorldLoader, WorldRequest},
 };
 use std::{
@@ -42,9 +43,9 @@ use sunrise_protocol::{crypto::offline_uuid, text::translatable};
 #[path = "integrated/capture.rs"]
 pub(super) mod capture;
 
-/// How long the window waits for the server thread to answer a `call`.
+/// How long the window waits for the server thread to answer an `ask`.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
-/// The error of a `call` without an answer: the server stopped, or it was
+/// The error of an `ask` without an answer: the server stopped, or it was
 /// busy past `CALL_TIMEOUT` (the log says which).
 pub(super) const NO_ANSWER: &str =
     "the integrated server stopped or did not answer within 10 s (the game log says which)";
@@ -148,15 +149,12 @@ impl Drop for Finished {
     }
 }
 
-/// Work the window hands its server thread (`MinecraftServer.execute`).
-type Task = Box<dyn FnOnce(&mut Game<'_>) + Send>;
-
 /// The window's handle on its server thread.
 pub(super) struct Integrated {
     flags: Arc<Flags>,
     thread: Option<JoinHandle<()>>,
     emergency_save: Option<sunrise_client::crash::EmergencySave>,
-    tasks: Sender<Task>,
+    tasks: Sender<OwnerRequest>,
     /// The world's name (`level.dat`'s `LevelName`), for the pause menu.
     pub world_name: String,
     pub save_folder: String,
@@ -166,17 +164,7 @@ impl Integrated {
     /// Queue every change, even if the currently published tree still has the requested state:
     /// an earlier update may be waiting for a busy server thread.
     fn queue_pregen_option(&self, enabled: bool) {
-        let _ = self.tasks.send(Box::new(move |g| {
-            use sunrise_client::command::vanilla;
-            if g.ui.dispatcher.0.find("pregen").is_some() != enabled {
-                vanilla::set_sunrise_commands(enabled);
-                g.ui.dispatcher = super::chat::SessionDispatcher(std::sync::Arc::new(
-                    vanilla::session_dispatcher(&g.level.rule_registry, &g.level.enabled_features),
-                ));
-                g.restore_native_commands();
-                g.resend_commands_filtered();
-            }
-        }));
+        self.tell(OwnerRequest::SetPregen(enabled));
     }
     /// The generator of the server's level in `dimension`, once it has run.
     pub fn terrain(
@@ -233,11 +221,7 @@ impl Integrated {
             .lock()
             .unwrap()
             .retain(|&u| u != uuid);
-        self.call(move |g| {
-            if let Some(host) = g.lan.as_mut() {
-                host.hub.ops.remove(&uuid);
-            }
-        });
+        self.ask(|done| OwnerRequest::LeaveSplit(uuid, done));
     }
     /// Splitscreen: a connection through memory for another player on this machine, who gets
     /// the owner's permissions. `None` once the server has stopped.
@@ -245,13 +229,7 @@ impl Integrated {
         let uuid = sunrise_protocol::crypto::offline_uuid(name);
         self.flags.split_players.lock().unwrap().push(uuid);
         let pipe = self
-            .call(move |g| {
-                let host = g.lan.as_mut()?;
-                let owner = host.owner.as_ref()?.uuid;
-                let level = host.hub.ops.get(&owner).copied().unwrap_or(0);
-                host.hub.ops.insert(uuid, level);
-                host.hub.lan.connect_local().ok()
-            })
+            .ask(|reply| OwnerRequest::JoinSplit(uuid, reply))
             .flatten();
         if pipe.is_none() {
             self.leave_split(name);
@@ -277,40 +255,62 @@ impl Integrated {
     pub fn published(&self) -> Option<u16> {
         Some(self.flags.published.load(Ordering::Relaxed)).filter(|&p| p != 0)
     }
-    /// `executeBlocking`: run `f` on the server thread between two ticks and
-    /// wait for its answer; `None` once the server has stopped, or when it has
-    /// not answered within `CALL_TIMEOUT` (`f` still runs there later). The log
-    /// tells the two apart.
+    /// `executeBlocking`: `None` once the server stopped or after `CALL_TIMEOUT` (the log tells which).
+    pub(super) fn ask<T: Send + 'static>(
+        &self,
+        build: impl FnOnce(Reply<T>) -> OwnerRequest,
+    ) -> Option<T> {
+        if self.flags.stop.load(Ordering::Relaxed) || self.flags.finished.load(Ordering::Acquire) {
+            return None;
+        }
+        let (tx, rx) = sync_channel(1);
+        self.tasks.send(build(tx)).ok()?;
+        let deadline = Instant::now() + CALL_TIMEOUT;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(25)) {
+                Ok(answer) => return Some(answer),
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.flags.stop.load(Ordering::Relaxed)
+                        || self.flags.finished.load(Ordering::Acquire)
+                    {
+                        return None;
+                    }
+                    if Instant::now() >= deadline {
+                        log::warn!(
+                            "Sunrise: the server thread did not answer within {} s (running: {}, \
+                             autosaving: {}, smoothed tick {:.1} ms)",
+                            CALL_TIMEOUT.as_secs(),
+                            !self.stopped(),
+                            self.is_saving(),
+                            self.smoothed_tick_ms()
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    /// `execute`: send a request without waiting for it. False once the server has stopped.
+    pub(super) fn tell(&self, request: OwnerRequest) -> bool {
+        self.tasks.send(request).is_ok()
+    }
+    /// Tests only: `f` on the server thread between two ticks, its answer awaited as `ask` does.
+    #[cfg(test)]
     pub fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Game<'_>) -> T + Send + 'static,
     ) -> Option<T> {
-        let (tx, rx) = sync_channel(1);
-        self.tasks
-            .send(Box::new(move |g| {
-                let _ = tx.send(f(g));
+        self.ask(|reply| {
+            OwnerRequest::InTest(Box::new(move |g| {
+                let _ = reply.send(f(g));
             }))
-            .ok()?;
-        match rx.recv_timeout(CALL_TIMEOUT) {
-            Ok(answer) => Some(answer),
-            Err(RecvTimeoutError::Timeout) => {
-                log::warn!(
-                    "Sunrise: the server thread did not answer within {} s (running: {}, \
-                     autosaving: {}, smoothed tick {:.1} ms)",
-                    CALL_TIMEOUT.as_secs(),
-                    !self.stopped(),
-                    self.is_saving(),
-                    self.smoothed_tick_ms()
-                );
-                None
-            }
-            Err(RecvTimeoutError::Disconnected) => None,
-        }
+        })
     }
-    /// `execute`: run `f` on the server thread between two ticks, without
-    /// waiting for it. False once the server has stopped.
+    /// Tests only: `f` on the server thread between two ticks, not awaited.
+    #[cfg(test)]
     pub fn post(&self, f: impl FnOnce(&mut Game<'_>) + Send + 'static) -> bool {
-        self.tasks.send(Box::new(f)).is_ok()
+        self.tell(OwnerRequest::InTest(Box::new(f)))
     }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {
@@ -356,7 +356,7 @@ impl Drop for Integrated {
 /// The server thread's side of the window's handle (`Game::serving`).
 pub(super) struct Serving {
     flags: Arc<Flags>,
-    tasks: Receiver<Task>,
+    tasks: Receiver<OwnerRequest>,
     /// The window's profile.
     pub(super) owner: u128,
     /// Open to LAN or closed from inside a player's command, while the hub
@@ -760,7 +760,7 @@ impl Game<'_> {
         &mut self,
         launch: Launch,
         flags: Arc<Flags>,
-        tasks: Receiver<Task>,
+        tasks: Receiver<OwnerRequest>,
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
@@ -776,7 +776,7 @@ impl Game<'_> {
         &mut self,
         launch: Launch,
         flags: Arc<Flags>,
-        tasks: Receiver<Task>,
+        tasks: Receiver<OwnerRequest>,
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
@@ -881,9 +881,6 @@ impl Game<'_> {
             self.publish_load_view();
             self.wait_for_next_server_tick(&mut next, paused);
         }
-        if failure.is_none() {
-            self.finish_server_capture();
-        }
         if let Some(error) = failure {
             let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.finish_server_capture();
@@ -934,7 +931,7 @@ impl Game<'_> {
         &mut self,
         launch: &Launch,
         flags: &Arc<Flags>,
-        tasks: Receiver<Task>,
+        tasks: Receiver<OwnerRequest>,
         ready: &Sender<Ready>,
         opening: Opening,
     ) -> Result<()> {
@@ -1057,6 +1054,7 @@ impl Game<'_> {
     pub(super) fn stop_integrated(&mut self, crashed: bool) -> Result<()> {
         // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
         self.streaming.abort_generation();
+        self.levels.abort_parked_generation();
         // The close request: lifecycle observation stops.
         self.native_lifecycle.begin_close();
         self.native_configs_server_stop();
@@ -1204,12 +1202,12 @@ impl Game<'_> {
 
     /// The window's requests, between two ticks.
     fn run_tasks(&mut self) {
-        let tasks: Vec<Task> = match &self.serving {
+        let requests: Vec<OwnerRequest> = match &self.serving {
             Some(s) => s.tasks.try_iter().collect(),
             None => return,
         };
-        for task in tasks {
-            task(self);
+        for request in requests {
+            self.serve_owner_request(request);
             self.apply_publish();
         }
     }
@@ -1395,7 +1393,7 @@ fn serve(
     settings: Settings,
     launch: Launch,
     flags: Arc<Flags>,
-    tasks: Receiver<Task>,
+    tasks: Receiver<OwnerRequest>,
     ready: &Sender<Ready>,
 ) -> Result<()> {
     // The world prepares, and the registries the server sends are read, on
@@ -1554,7 +1552,7 @@ pub(super) mod tests {
         let home = scratch.path().to_path_buf();
         let previous = std::panic::take_hook();
         sunrise_client::crash::install(home.clone(), "client");
-        let (tasks, receiver) = channel::<Task>();
+        let (tasks, receiver) = channel::<OwnerRequest>();
         let mut server = Integrated {
             emergency_save: None,
             flags: Arc::new(Flags::default()),
@@ -1578,7 +1576,7 @@ pub(super) mod tests {
                 .stack_size(server_thread_stack())
                 .spawn(move || {
                     crate::game::native_entity_refs::tests::with_game(|game| {
-                        receiver.recv().unwrap()(game);
+                        game.serve_owner_request(receiver.recv().unwrap());
                     });
                 })
                 .unwrap(),
@@ -1641,7 +1639,9 @@ pub(super) mod tests {
             load: LoadPhase::default(),
         });
         move || {
-            flags.published.load(Ordering::Relaxed) == 0 && tasks.send(Box::new(|_| {})).is_err()
+            // Pregen is off in tests, so a probe the server does read changes nothing.
+            flags.published.load(Ordering::Relaxed) == 0
+                && tasks.send(OwnerRequest::SetPregen(false)).is_err()
         }
     }
 
@@ -1814,10 +1814,16 @@ pub(super) mod tests {
         server.queue_pregen_option(true);
         server.queue_pregen_option(false);
         assert!(
-            waiting_server.try_recv().is_ok(),
+            matches!(waiting_server.try_recv(), Ok(OwnerRequest::SetPregen(true))),
             "enable must reach the server"
         );
-        assert!(waiting_server.try_recv().is_ok(), "disable must follow it");
+        assert!(
+            matches!(
+                waiting_server.try_recv(),
+                Ok(OwnerRequest::SetPregen(false))
+            ),
+            "disable must follow it"
+        );
         assert!(waiting_server.try_recv().is_err());
     }
 

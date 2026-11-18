@@ -4193,25 +4193,18 @@ impl Game<'_> {
 /// Respawning the dragon with end crystals on the exit portal
 /// (`EndCrystalItem.useOn`, `EnderDragonFight.tryRespawn`, `DragonRespawnStage`).
 impl Game<'_> {
-    /// `EndCrystalItem.useOn`: on obsidian or bedrock with room above.
-    pub(super) fn place_end_crystal(
-        &mut self,
-        hit: &super::Hit,
-        stack: &sunrise_client::items::ItemStack,
-    ) -> bool {
-        if &*stack.item != "minecraft:end_crystal" {
-            return false;
-        }
-        let name = self
+    /// `EndCrystalItem.useOn`'s checks: obsidian or bedrock at `pos`, air
+    /// above it and no entity in the two blocks above (else FAIL).
+    pub(in crate::game) fn end_crystal_fits(&self, pos: [i32; 3]) -> bool {
+        let name = &self
             .res
             .facts()
-            .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-            .name
-            .clone();
-        if !matches!(&*name, "minecraft:obsidian" | "minecraft:bedrock") {
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name;
+        if !matches!(&**name, "minecraft:obsidian" | "minecraft:bedrock") {
             return false;
         }
-        let above = [hit.pos[0], hit.pos[1] + 1, hit.pos[2]];
+        let above = [pos[0], pos[1] + 1, pos[2]];
         if !self
             .res
             .facts()
@@ -4224,10 +4217,27 @@ impl Game<'_> {
             f64::from(above[1]),
             f64::from(above[2]),
         );
-        let room = Aabb::new(Vec3::new(x, y, z), Vec3::new(x + 1.0, y + 2.0, z + 1.0));
-        if self.entity_in(room) {
+        !self.entity_in(Aabb::new(
+            Vec3::new(x, y, z),
+            Vec3::new(x + 1.0, y + 2.0, z + 1.0),
+        ))
+    }
+
+    /// `EndCrystalItem.useOn`: on obsidian or bedrock with room above.
+    pub(super) fn place_end_crystal(
+        &mut self,
+        hit: &super::Hit,
+        stack: &sunrise_client::items::ItemStack,
+    ) -> bool {
+        if &*stack.item != "minecraft:end_crystal" || !self.end_crystal_fits(hit.pos) {
             return false;
         }
+        let above = [hit.pos[0], hit.pos[1] + 1, hit.pos[2]];
+        let (x, y, z) = (
+            f64::from(above[0]),
+            f64::from(above[1]),
+            f64::from(above[2]),
+        );
         // EndCrystal's constructor: `this.random.nextInt(100000)`, the crystal's own random.
         let drawn = random_source::entity().next_int_bound(100_000).unwrap_or(0);
         let at = Vec3::new(x + 0.5, y, z + 0.5);

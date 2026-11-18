@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Вид",
   "sunrise.studio.topbar.view_short": "Вид",
   "sunrise.studio.unknown_server": "Неизвестно",
-  "sunrise.tempban.dedicated_required": "Временные баны требуют выделенного сервера",
-  "sunrise.tempban.invalid_duration": "%s — не длительность: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Временных банов (%s):",
-  "sunrise.tempban.list.empty": "Временных банов нет",
-  "sunrise.tempban.list.entry": "%1$s забанен %2$s %3$s (до %4$s)",
-  "sunrise.tempban.success": "Игрок %1$s забанен на %2$s, до %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Не связан с Mojang или Microsoft"
 }

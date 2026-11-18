@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Zobrazení",
   "sunrise.studio.topbar.view_short": "Zobr",
   "sunrise.studio.unknown_server": "Neznámý",
-  "sunrise.tempban.dedicated_required": "Dočasné bany vyžadují dedikovaný server",
-  "sunrise.tempban.invalid_duration": "%s není doba: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Počet dočasných banů: %s:",
-  "sunrise.tempban.list.empty": "Žádné dočasné bany",
-  "sunrise.tempban.list.entry": "%1$s byl zabanován hráčem %2$s %3$s (do %4$s)",
-  "sunrise.tempban.success": "%1$s na %2$s, do %3$s",
-  "sunrise.tempban.usage": "/tempban <hráč> <doba> [důvod]",
   "sunrise.title.not_affiliated": "Není spojen s Mojang nebo Microsoft"
 }

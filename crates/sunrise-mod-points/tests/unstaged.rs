@@ -26,7 +26,7 @@ fn tick(_: mod_api::HostSide<'_>, _: &mut mod_points::TickArgs) {}
 fn a_place_outside_the_table_is_refused() {
     struct Never;
     impl Forward for Never {
-        fn forward(&self, _: u32, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
+        fn forward(&self, _: u64, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
     }
     let place = Place::new(&mod_points::__private::TABLE, usize::MAX);
     let slot = SlotListener::forwarded("outside_mod", place, &Never, 0);

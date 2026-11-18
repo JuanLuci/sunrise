@@ -625,14 +625,17 @@ impl Game<'_> {
     }
     /// `MultiPlayerGameMode.sameDestroyTarget`'s item half for the stack
     /// `began` a break began with: `ItemStack.isSameItemSameComponents` with
-    /// the main hand now (count and damage left out, as vanilla's kept
-    /// reference sees an in-place change), which the parts of `began`'s item
-    /// may overturn (`IItemExtension.shouldCauseBlockBreakReset`).
+    /// the main hand now, which the parts of `began`'s item may overturn
+    /// (`IItemExtension.shouldCauseBlockBreakReset`). The count is left out
+    /// (not a component; vanilla's kept reference also sees a use shrink the
+    /// stack in place); the damage is compared, as a client's tool only wears
+    /// by the server sending a new stack for the slot, which the reference
+    /// kept from before doesn't share.
     pub(super) fn same_destroying_item(&self, began: &Option<ItemStack>) -> bool {
         let held = self.held();
         let same = match (began, held) {
             (None, None) => true,
-            (Some(a), Some(b)) => a.item == b.item && a.extra == b.extra,
+            (Some(a), Some(b)) => a.item == b.item && a.damage == b.damage && a.extra == b.extra,
             _ => false,
         };
         let Some(began) = began else {
@@ -666,6 +669,7 @@ impl Game<'_> {
             || before(self.cart_hit().map(|h| h.1))
             || before(self.interaction_hit().map(|h| h.1))
             || before(self.dragon_hit().map(|h| h.1))
+            || before(self.crystal_hit().map(|h| h.1))
             || before(self.mob_hit().map(|h| h.1))
             || before(self.redirectable_hit().map(|h| h.1))
     }

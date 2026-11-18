@@ -25,7 +25,7 @@ fn child() -> PendingMobSpec {
 /// Call the generated set_yaw service from wasm, returning its actual encoded result.
 /// The input is encoded by Wire; no field offsets or enum discriminants are assumed.
 fn yaw_module(trap: bool) -> WasmMod {
-    let id = crate::boundary::import_id("PendingChildrenEdits", "set_yaw").unwrap();
+    let id = crate::boundary::import_index("PendingChildrenEdits", "set_yaw").unwrap();
     module(&format!(
         "i32.const {id} local.get 1 local.get 2 i32.const 1024 i32.const 128 call $host {}",
         if trap {

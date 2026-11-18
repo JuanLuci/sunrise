@@ -18,7 +18,7 @@ fn full_group_budget_leaves_static_replies_usable_without_acknowledging_unknown_
         }
         let encoded = encoded.into_bytes();
         guest::set_transport(Some(std::rc::Rc::new(move |_, _| encoded.clone())));
-        let result = guest::host(0, guest::begin())
+        let result = guest::host_named("test", guest::begin())
             .take_static::<()>()
             .map(|(value, ())| value);
         guest::set_transport(None);

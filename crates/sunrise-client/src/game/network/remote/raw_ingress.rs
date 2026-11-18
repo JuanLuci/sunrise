@@ -21,12 +21,17 @@ impl Remote {
 }
 
 impl Game<'_> {
-    pub(super) fn poll_remote_events(&mut self) -> Result<()> {
+    /// Handle what the server sent, in order. `before_tick`: a tick is about to
+    /// run, so what an earlier poll left for later is taken whole (no frame
+    /// budget, each column waited for) and nothing newer is received.
+    pub(super) fn poll_remote_events(&mut self, before_tick: bool) -> Result<()> {
         let Some(r) = self.remote.as_mut() else {
             return Ok(());
         };
         let mut events = std::mem::take(&mut r.backlog);
-        r.receive_credited_backlog(&mut events);
+        if !before_tick {
+            r.receive_credited_backlog(&mut events);
+        }
         let overdue = r
             .backlog_since
             .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
@@ -49,7 +54,7 @@ impl Game<'_> {
             });
             forgotten_credits.clear();
             let chunk = matches!(item, Received::Chunk(_, _));
-            if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
+            if chunk && !overdue && !before_tick && chunks >= CHUNK_PACKETS_PER_FRAME {
                 events.push_front(item);
                 break;
             }
@@ -59,7 +64,13 @@ impl Game<'_> {
                 Received::Chunk(format, credit) => {
                     // A column still decoding waits for the next frame, with
                     // what came after it, overdue or not.
-                    let Some(next) = self.remote.as_ref().map(|r| r.decoder.next()) else {
+                    let Some(next) = self.remote.as_ref().map(|r| {
+                        if before_tick {
+                            r.decoder.wait_next(TICK_DECODE_WAIT)
+                        } else {
+                            r.decoder.next()
+                        }
+                    }) else {
                         break;
                     };
                     let (packet, column) = match next {

@@ -851,6 +851,7 @@ mod mod_spawn_rule_tests {
             fluid_falling: false,
             waterlogged: false,
             random_offset: false,
+            offset_limits: None,
             outline_offset: false,
             legacy_solid: full,
             sturdy_full: 0,

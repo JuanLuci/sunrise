@@ -139,7 +139,7 @@ impl Report {
     pub fn text(&self) -> String {
         let comment = COMMENTS[self.time.timestamp().rem_euclid(COMMENTS.len() as i64) as usize];
         let mut out = String::new();
-        let _ = writeln!(out, "---- Sunrise Crash Report ----");
+        let _ = writeln!(out, "---- Minecraft Crash Report ----");
         for header in &self.headers {
             let _ = writeln!(out, "{header}");
         }
@@ -1279,7 +1279,7 @@ mod tests {
     fn the_report_reads_like_vanillas() {
         let text = report().text();
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[0], "---- Sunrise Crash Report ----");
+        assert_eq!(lines[0], "---- Minecraft Crash Report ----");
         assert!(lines[1].starts_with("// "));
         assert_eq!(lines[3], "Time: 2026-10-14 09:05:07");
         assert_eq!(lines[4], "Description: Unexpected error");
@@ -1493,7 +1493,7 @@ mod tests {
             let lines: Vec<&str> = text.lines().collect();
             assert_eq!(
                 lines[..2],
-                ["---- Sunrise Crash Report ----", "test: modded"]
+                ["---- Minecraft Crash Report ----", "test: modded"]
             );
             assert!(lines[2].starts_with("// "));
         });

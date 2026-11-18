@@ -288,9 +288,7 @@ pub fn access_allowed(operation: &str, access: LoadAccess) -> bool {
 }
 
 /// Whether a package contains compiled code or content alone.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackageKind {
     /// The package carries compiled code.
@@ -300,9 +298,7 @@ pub enum PackageKind {
 }
 
 /// Read-only package metadata available during registration.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone)]
+#[derive(sunrise_mod_api_macros::Wire, Clone)]
 #[non_exhaustive]
 pub struct PackageInfo {
     pub(crate) id: String,
@@ -793,10 +789,11 @@ impl DataLoadContext for OwningLoad<'_> {
     }
 }
 
-/// The view of a hook fired inside a menu, recipe or player-list loop, where no
-/// game is at hand: the side, the registries, the settings and the mod list.
-/// The side that owns the loop builds it once per resource generation; a hook
-/// never builds one, and its answers never change while it is held.
+/// The frozen resource-generation view of a hook fired inside a menu, recipe or
+/// player-list loop: the side, registries, settings, mod list and authoritative item
+/// tags. A loop without a tag-bearing snapshot (for example, the sound engine) returns
+/// `None` from tag reads even after world tags sync. The side that owns the loop builds
+/// this view; its answers never change while held.
 ///
 /// ```compile_fail
 /// use mod_api::{Host, LoopContext};
@@ -811,6 +808,20 @@ impl DataLoadContext for OwningLoad<'_> {
 /// }
 /// ```
 pub trait LoopContext {
+    /// Membership in this generation's authoritative item tags. `None` means the
+    /// snapshot or item keys are unavailable. Unknown tags in a loaded snapshot
+    /// answer `Some(false)`. Reads allocate nothing and perform no file I/O.
+    fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool>;
+
+    /// Number of authoritative item members, or `None` if the snapshot or item
+    /// keys are unavailable. Unknown tags in a loaded snapshot have zero members.
+    /// Reads allocate nothing and do no I/O.
+    fn item_count(&self, tag: crate::TagKey) -> Option<usize>;
+
+    /// Item member in authoritative order from this same frozen generation.
+    /// None means unavailable data or an out-of-range index. Reads allocate nothing.
+    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey>;
+
     /// Whether a mod-created recipe property set accepts an item ID. Unknown
     /// sets/items and vanilla set keys return false. Use this in
     /// `menu_slot_rules` for the same filter on server and client prediction.
@@ -833,6 +844,21 @@ pub trait LoopContext {
 
 /// Immutable resource-generation reads supplied by an owning loop.
 pub trait LoopReader: Sync {
+    /// Authoritative membership, unavailable until this reader has tag inputs.
+    fn item_is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool> {
+        let _ = (item, tag);
+        None
+    }
+    /// Authoritative member count, unavailable until tags and keys are loaded.
+    fn item_count(&self, tag: crate::TagKey) -> Option<usize> {
+        let _ = tag;
+        None
+    }
+    /// An authoritative member in source order, without allocation.
+    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey> {
+        let _ = (tag, index);
+        None
+    }
     /// Mod-created recipe property membership from the owning generation.
     fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
         let _ = (set, item);
@@ -867,6 +893,15 @@ impl<'a> OwningLoop<'a> {
 }
 
 impl LoopContext for OwningLoop<'_> {
+    fn is_in_tag(&self, item: crate::ItemKey, tag: crate::TagKey) -> Option<bool> {
+        self.source.item_is_in_tag(item, tag)
+    }
+    fn item_count(&self, tag: crate::TagKey) -> Option<usize> {
+        self.source.item_count(tag)
+    }
+    fn item_at(&self, tag: crate::TagKey, index: usize) -> Option<crate::ItemKey> {
+        self.source.item_at(tag, index)
+    }
     fn mod_recipe_property_contains(&self, set: &str, item: crate::ItemKey) -> bool {
         self.source.mod_recipe_property_contains(set, item)
     }

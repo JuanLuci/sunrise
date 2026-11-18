@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Görünüş",
   "sunrise.studio.topbar.view_short": "Görünüş",
   "sunrise.studio.unknown_server": "Naməlum",
-  "sunrise.tempban.dedicated_required": "Müvəqqəti qadağalar üçün ayrılmış server lazımdır",
-  "sunrise.tempban.invalid_duration": "%s müddət deyil: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s müvəqqəti qadağa var:",
-  "sunrise.tempban.list.empty": "Heç bir müvəqqəti qadağa yoxdur",
-  "sunrise.tempban.list.entry": "%1$s, %2$s tərəfindən %3$s qadağan edildi (%4$s tarixinə qədər)",
-  "sunrise.tempban.success": "%1$s, %2$s müddətinə, %3$s tarixinə qədər",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang və ya Microsoft ilə əlaqəli deyil"
 }

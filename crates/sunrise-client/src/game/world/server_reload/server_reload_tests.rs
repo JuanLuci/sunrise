@@ -265,6 +265,47 @@ fn request(root: &Path) -> WorldRequest {
 
 #[test]
 #[ignore = "daily"]
+fn dedicated_world_open_publishes_crafting_item_tags() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    write(
+        &root.join("datapacks/crafting_tags/pack.mcmeta"),
+        r#"{"pack":{"description":"crafting tags"}}"#,
+    );
+    write(
+        &root.join("datapacks/crafting_tags/data/test/tags/item/crafting_inputs.json"),
+        r#"{"values":[{"id":"test:absent_optional","required":false},"minecraft:stick"]}"#,
+    );
+    write(
+        &root.join("datapacks.json"),
+        r#"{"enabled":["file/crafting_tags"],"disabled":[]}"#,
+    );
+    mod_platform::testing::with_mods(Vec::<ModEntry>::new().into(), || {
+        with_game(|game| {
+            game.options.execution_role =
+                crate::game::execution_role::ExecutionRole::DedicatedServer;
+            game.load_world(request(root)).unwrap();
+            use mod_api::LoopContext;
+            use sunrise_client_render::api_context::LoopReader;
+            let tag = mod_api::__private::tag_key(
+                &mod_api::Identifier::parse("test:crafting_inputs").unwrap(),
+            )
+            .unwrap();
+            let stick = mod_api::__private::item_key("minecraft:stick").unwrap();
+            let dirt = mod_api::__private::item_key("minecraft:dirt").unwrap();
+            let reader = LoopReader(&game.loop_context);
+            let view = reader.context();
+            assert_eq!(view.is_in_tag(stick, tag), Some(true));
+            assert_eq!(view.is_in_tag(dirt, tag), Some(false));
+            assert_eq!(view.item_count(tag), Some(1));
+            assert_eq!(view.item_at(tag, 0), Some(stick));
+            assert_eq!(view.item_at(tag, 1), None);
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owners() {
     const MODE: &str = "SUNRISE_JAR_RELOAD_CHILD";
     let root = if let Some(root) = std::env::var_os(MODE) {

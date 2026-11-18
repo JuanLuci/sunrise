@@ -136,40 +136,82 @@ fn from_api(stack: mod_api::ItemStack) -> Option<ItemStack> {
         extra,
     })
 }
-impl ModRecipe {
-    pub fn assemble(&self, grid: &[Option<ItemStack>], size: usize) -> Option<Option<ItemStack>> {
-        self.assemble_owned(snapshot(grid, size)?)
+/// Borrows the pre-take grid and its owning default rule for this one callback.
+struct CraftingRemainderView<'a> {
+    context: mod_api::OwningLoop<'a>,
+    grid: &'a [Option<ItemStack>],
+    size: usize,
+    width: usize,
+    height: usize,
+    default: &'a dyn Fn(&ItemStack) -> Option<ItemStack>,
+}
+impl mod_api::LoopContext for CraftingRemainderView<'_> {
+    fn is_in_tag(&self, item: mod_api::ItemKey, tag: mod_api::TagKey) -> Option<bool> {
+        self.context.is_in_tag(item, tag)
     }
-    fn assemble_owned(&self, input: CraftingGrid) -> Option<Option<ItemStack>> {
+    fn item_count(&self, tag: mod_api::TagKey) -> Option<usize> {
+        self.context.item_count(tag)
+    }
+    fn item_at(&self, tag: mod_api::TagKey, index: usize) -> Option<mod_api::ItemKey> {
+        self.context.item_at(tag, index)
+    }
+    fn mod_recipe_property_contains(&self, set: &str, item: mod_api::ItemKey) -> bool {
+        self.context.mod_recipe_property_contains(set, item)
+    }
+    fn side(&self) -> mod_api::LoopSide {
+        self.context.side()
+    }
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.context.registry(name)
+    }
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.context.setting(mod_id, key)
+    }
+    fn mods(&self) -> mod_api::LoadedMods {
+        self.context.mods()
+    }
+}
+impl mod_api::CraftingRemainders for CraftingRemainderView<'_> {
+    fn default_remainder(&self, cell: u32) -> Option<mod_api::ItemStack> {
+        let cell = usize::try_from(cell).ok()?;
+        if cell >= self.width * self.height {
+            return None;
+        }
+        let stack = self
+            .grid
+            .get(cell / self.width * self.size + cell % self.width)?
+            .as_ref()?;
+        (self.default)(stack).and_then(|stack| to_api(&stack))
+    }
+}
+
+impl ModRecipe {
+    pub fn assemble(
+        &self,
+        context: &LoopContext,
+        grid: &[Option<ItemStack>],
+        size: usize,
+    ) -> Option<Option<ItemStack>> {
+        self.assemble_owned(context, snapshot(grid, size)?)
+    }
+    fn assemble_owned(
+        &self,
+        context: &LoopContext,
+        input: CraftingGrid,
+    ) -> Option<Option<ItemStack>> {
+        let reader = sunrise_client_render::api_context::LoopReader(context);
+        let context = reader.context();
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.handler
-                .matches(&self.value, input.clone())
-                .then(|| self.handler.assemble(&self.value, input).and_then(from_api))
+                .matches(&context, &self.value, input.clone())
+                .then(|| {
+                    self.handler
+                        .assemble(&context, &self.value, input)
+                        .and_then(from_api)
+                })
         }))
         .ok()
         .flatten()
-    }
-    pub fn remainders(
-        &self,
-        grid: &[Option<ItemStack>],
-        size: usize,
-    ) -> Option<Vec<Option<ItemStack>>> {
-        let input = snapshot(grid, size)?;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.handler.remaining_items(&self.value, input)
-        }))
-        .ok()
-        .flatten()?;
-        if result.len() != size * size {
-            return None;
-        }
-        result
-            .into_iter()
-            .map(|cell| match cell {
-                Some(stack) => from_api(stack).map(Some),
-                None => Some(None),
-            })
-            .collect()
     }
     pub fn written(&self) -> Result<String, String> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -217,7 +259,7 @@ impl Recipes {
             let result = match recipe {
                 Recipe::Mod(recipe) => input
                     .as_ref()
-                    .and_then(|input| recipe.assemble_owned(input.clone())),
+                    .and_then(|input| recipe.assemble_owned(context, input.clone())),
                 _ => vanilla
                     .as_ref()
                     .and_then(|input| Self::assemble_if_matches(&ctx, input, recipe)),
@@ -231,6 +273,7 @@ impl Recipes {
     /// Remainders for a rectangular host lookup, placed back on the padded grid.
     pub fn mod_remainders_rect(
         &self,
+        context: &LoopContext,
         id: &str,
         grid: &[Option<ItemStack>],
         size: usize,
@@ -249,8 +292,17 @@ impl Recipes {
         let Some(input) = snapshot_dimensions(grid, size, width, height) else {
             return fallback();
         };
+        let reader = sunrise_client_render::api_context::LoopReader(context);
+        let view = CraftingRemainderView {
+            context: reader.context(),
+            grid,
+            size,
+            width,
+            height,
+            default,
+        };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            recipe.handler.remaining_items(&recipe.value, input)
+            recipe.handler.remaining_items(&view, &recipe.value, input)
         }))
         .ok()
         .flatten();

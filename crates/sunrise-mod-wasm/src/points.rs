@@ -15,7 +15,7 @@ struct Endpoint {
 }
 
 impl Forward for Endpoint {
-    fn forward(&self, id: u32, host: PointHost<'_>, record: &mut dyn mod_api::wire::Record) {
+    fn forward(&self, id: u64, host: PointHost<'_>, record: &mut dyn mod_api::wire::Record) {
         let mut frame = Frame::default();
         let mut side = None;
         match host {
@@ -49,7 +49,7 @@ impl Endpoint {
     fn invoke(
         &self,
         frame: Frame,
-        id: u32,
+        id: u64,
         prefix: impl FnOnce(&mut mod_api::wire::Writer),
         record: &mut dyn mod_api::wire::Record,
     ) {
@@ -104,11 +104,11 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             ));
         }
     }
-    let listed: Vec<(u32, String)> = module
+    let listed: Vec<(String, String)> = module
         .call(
             CallClass::Load,
             Frame::default(),
-            0xBFFF_FFFF,
+            mod_points::SUBSCRIPTIONS,
             None,
             |_| {},
             |input| input.take(),
@@ -124,7 +124,7 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             .remove(id.as_str())
             .ok_or_else(|| format!("undeclared point listener {id}"))?;
         let point =
-            checked_place(&id, inject, place).map_err(|e| format!("{}: {e}", manifest.id))?;
+            checked_place(&id, inject, &place).map_err(|e| format!("{}: {e}", manifest.id))?;
         slots.push((
             point,
             index as u32,
@@ -144,9 +144,8 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let mut slot =
-            SlotListener::forwarded(owner, place.place(), endpoint, 0x8000_0000 + place as u32)
-                .ordered(priority, id);
+        let mut slot = SlotListener::forwarded(owner, place.place(), endpoint, place.id())
+            .ordered(priority, id);
         // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
         // slot carries the mark, so a second replace at the place is refused for either target.
         if replace {
@@ -160,10 +159,10 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
 /// The engine's API place `place` that a guest subscribed as its declared `inject`, checked
 /// against the game's own point list, not what the module says of itself: the target, the phase,
 /// and, for a `replace`, that its head returns `()` or an API value the listener can produce.
-fn checked_place(id: &str, inject: &Inject, place: u32) -> Result<PointId, String> {
+fn checked_place(id: &str, inject: &Inject, place: &str) -> Result<PointId, String> {
     let Some(&(point, target, at_return, replace_refusal)) = mod_points::API_PLACES
         .iter()
-        .find(|(point, ..)| *point as u32 == place)
+        .find(|(point, ..)| point.name() == place)
     else {
         return Err(format!(
             "{id}: {}: no API record for place {place}",
@@ -216,10 +215,10 @@ mod tests {
                 r#"(module
             (@custom "dylink.0" "\01\04\00\00\00\00")
             (import "env" "memory" (memory 1))
-            (func (export "sunrise_layout") (result i64) i64.const {})
+            {log}
             (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
-            (func (export "sunrise_hook") (param i32) (result i64) i64.const 0))"#,
-                *mod_api::wire::LAYOUT
+            (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+                log = crate::imports::fixtures::log_import()
             ))
             .unwrap();
             let mut modules = WasmMod::instantiate(
@@ -265,10 +264,10 @@ with='no_wire'
                 r#"(module
             (@custom "dylink.0" "\01\04\00\00\00\00")
             (import "env" "memory" (memory 1))
-            (func (export "sunrise_layout") (result i64) i64.const {})
+            {log}
             (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
-            (func (export "sunrise_hook") (param i32) (result i64) i64.const 0))"#,
-                *mod_api::wire::LAYOUT
+            (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
+                log = crate::imports::fixtures::log_import()
             ))
             .unwrap();
             let mut modules = WasmMod::instantiate(
@@ -293,11 +292,15 @@ with='no_wire'
 
     #[test]
     fn missing_place_names_mod_row_and_declared_target() {
-        let error =
-            checked_place("addon:own", &inject(Kind::Head, "game::tick"), u32::MAX).unwrap_err();
+        let error = checked_place(
+            "addon:own",
+            &inject(Kind::Head, "game::tick"),
+            "no_such_place",
+        )
+        .unwrap_err();
         assert_eq!(
             error,
-            "addon:own: game::tick: no API record for place 4294967295"
+            "addon:own: game::tick: no API record for place no_such_place"
         );
     }
 
@@ -314,21 +317,21 @@ with='no_wire'
             .find(|(.., refusal)| refusal.is_some_and(|ty| ty.starts_with("Result")))
             .expect("a game point returning Result<(), E> with an API record");
         let error =
-            checked_place("own", &inject(Kind::Replace, target), fallible as u32).unwrap_err();
+            checked_place("own", &inject(Kind::Replace, target), fallible.name()).unwrap_err();
         assert!(
             error.contains(target) && error.contains(&format!("`{}`", refusal.unwrap())),
             "{error}"
         );
         // An ordinary head listener there is unaffected.
         assert_eq!(
-            checked_place("own", &inject(Kind::Head, target), fallible as u32),
+            checked_place("own", &inject(Kind::Head, target), fallible.name()),
             Ok(fallible)
         );
         let &(owned, target, ..) = heads()
             .find(|(.., refusal)| refusal.is_none())
             .expect("a game point a replace can own");
         assert_eq!(
-            checked_place("own", &inject(Kind::Replace, target), owned as u32),
+            checked_place("own", &inject(Kind::Replace, target), owned.name()),
             Ok(owned)
         );
     }

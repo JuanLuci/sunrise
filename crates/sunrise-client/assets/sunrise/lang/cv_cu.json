@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Курӑну",
   "sunrise.studio.topbar.view_short": "Курӑну",
   "sunrise.studio.unknown_server": "Паллӑ мар",
-  "sunrise.tempban.dedicated_required": "Вӑхӑтлӑ чарӑнусем валли уйрӑм сервер кирлӗ",
-  "sunrise.tempban.invalid_duration": "%s — вӑхӑт мар: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s вӑхӑтлӑ чарӑну:",
-  "sunrise.tempban.list.empty": "Вӑхӑтлӑ чарӑнусем ҫук",
-  "sunrise.tempban.list.entry": "%1$s чарнӑ: %2$s %3$s (%4$s таран)",
-  "sunrise.tempban.success": "%1$s %2$s валли, %3$s таран",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang е Microsoft ҫыхӑнман"
 }

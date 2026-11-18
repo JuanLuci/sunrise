@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "عرض",
   "sunrise.studio.topbar.view_short": "عرض",
   "sunrise.studio.unknown_server": "غير معروف",
-  "sunrise.tempban.dedicated_required": "تتطلب الحظور المؤقتة خادمًا مخصصًا",
-  "sunrise.tempban.invalid_duration": "%s ليس مدة: 30m، 12h، 7d",
-  "sunrise.tempban.list.count": "هناك %s حظر مؤقت:",
-  "sunrise.tempban.list.empty": "لا توجد حظور مؤقتة",
-  "sunrise.tempban.list.entry": "تم حظر %1$s بواسطة %2$s %3$s (حتى %4$s)",
-  "sunrise.tempban.success": "%1$s لمدة %2$s، حتى %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "لا ينتمي إلى Mojang أو Microsoft"
 }

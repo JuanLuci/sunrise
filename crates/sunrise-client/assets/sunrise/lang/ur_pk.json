@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "منظر",
   "sunrise.studio.topbar.view_short": "منظر",
   "sunrise.studio.unknown_server": "نامعلوم",
-  "sunrise.tempban.dedicated_required": "عارضی بین کے لیے ڈیڈیکیٹڈ سرور چاہیے",
-  "sunrise.tempban.invalid_duration": "%s کوئی دورانیہ نہیں: 30m، 12h، 7d",
-  "sunrise.tempban.list.count": "%s عارضی بین ہیں:",
-  "sunrise.tempban.list.empty": "کوئی عارضی بین نہیں ہیں",
-  "sunrise.tempban.list.entry": "%1$s کو %2$s نے %3$s بین کیا (%4$s تک)",
-  "sunrise.tempban.success": "%1$s کو %2$s کے لیے بین کیا، %3$s تک",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "موجانگ یا مائیکروسافٹ سے وابستہ نہیں"
 }

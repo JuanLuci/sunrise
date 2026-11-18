@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "பார்வை",
   "sunrise.studio.topbar.view_short": "பார்வை",
   "sunrise.studio.unknown_server": "தெரியாதது",
-  "sunrise.tempban.dedicated_required": "தற்காலிக தடைகளுக்கு பிரத்யேக சேவையகம் தேவை",
-  "sunrise.tempban.invalid_duration": "%s ஒரு கால அளவு அல்ல: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "%s தற்காலிக தடை(கள்) உள்ளன:",
-  "sunrise.tempban.list.empty": "தற்காலிக தடைகள் எதுவும் இல்லை",
-  "sunrise.tempban.list.entry": "%2$s ஆல் %1$s தடை செய்யப்பட்டது %3$s (%4$s வரை)",
-  "sunrise.tempban.success": "%1$s, %2$s காலத்திற்கு, %3$s வரை",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang அல்லது Microsoft உடன் இணைக்கப்படவில்லை"
 }

@@ -15,9 +15,11 @@ pub trait Hooks {
     /// runs often, at least six times per `setBlock` that updates shapes
     /// (more for redstone wire's diagonals and knock-on updates): keep it
     /// short.
+    /// A disabled owner's subscribed update keeps the input state instead of running the template.
     #[hook(
         side = "server",
         contract = "replace",
+        inert = "*new = Some(state);",
         out = "new",
         scope = "block",
         key = "state",

@@ -58,39 +58,40 @@ The derive writes the representation and maps a failed conversion to
 
 ## Layout identity
 
-`Wire::layout` computes an encoding identity recursively, including field names,
-case names and child layouts. It is a runtime method, not a constant, because
-recursive types need a visited-type stack. Container layout follows encoding:
-`Vec<T>` and `VecDeque<T>` agree, as do `String` and `Box<str>`; `Box<T>` is
-transparent. Changing a crossing field requires rebuilding dependents; the wire
-format has no compatibility versions or default fields.
+A type's identity is its shape (`mod_surface::shape`): a canonical description of its fields,
+case names and child types, whose hash a built mod carries inside the name of every call that
+carries the type. The derive declares the shape from the Rust fields; a hand-written impl declares
+one with `layout_fields!` (its fields) or `layout_via!(T)` (it crosses as `T`). Container shapes
+follow encoding: `Vec<T>` and `VecDeque<T>` agree, as do `String` and `Box<str>`; `Box<T>` is
+transparent. A type's path is not part of its shape. Changing a crossing field requires rebuilding
+dependents; the wire format has no compatibility versions or default fields.
 
 `cargo sunrise-mod build` writes `layouts.json` at the package root, mapping mod IDs
-to public type paths and their 16-digit hexadecimal layout identities. It includes
-the mod dependencies it compiled against. A cached host probe under
-`target/sunrise-mod/` computes these values, for both native and wasm builds. When
-there are no concrete crossing types, no probe is built and no file is written.
-If `layouts.json` already exists, the build refuses to discard its recorded types.
+to public type paths and their identities (the same shape function, 32 hexadecimal digits). It
+includes the mod libraries it builds against. The identities are computed from the libraries' source,
+with no compile: nested types enter through their own shapes, a `mod_api` type by its shape in the
+pinned SDK's `surface.json` (inside the game checkout, where no SDK is published, the surface exported from that checkout), and a type
+of another mod library by that library's identity. Fields under `#[cfg]` all count. When
+there are no concrete crossing types, no file is written.
+A `layouts.json` of the old 16-digit format is read as legacy and the build writes it again. If `layouts.json` already exists, the build refuses to discard its recorded types.
 Review the removal of the final public crossing type, then remove the file explicitly.
 Private types without a public path and uninstantiated generic declarations are
 not listed; a public re-export can give a private module's type a public path.
 
-A mixed-target dependent with a different layout is refused naming the library
-and differing type. Matching layouts do not enable dependencies between native
+A mixed-target dependent with a different identity is refused naming the library
+and differing type. Matching identities do not enable dependencies between native
 and wasm mods: the loader refuses those edges explicitly.
 
 ## Hand-written implementations
 
-The trait is unsealed. A hand-written implementation must supply `put`, `take`,
-`MIN`, and `LAYOUT_SEED`; compound encodings must override the hidden `layout`
-method to incorporate their children and handle recursive visits. Never use a
-constant leaf seed for a compound encoding: field changes must change its identity.
-The derive handles this bookkeeping automatically and is preferred.
+The trait is unsealed. A hand-written implementation must supply `put`, `take` and `MIN`,
+and declare its shape beside the impl with `layout_fields!` or `layout_via!`; the build
+refuses a crossing type with none. The derive handles this automatically and is preferred.
 
 A hand decoder owns tag validation and must use `Reader::nested` for recursive
 values. `Reader` checks byte bounds and UTF-8, but cannot enforce invariants that
 an implementation neglects. Keep validation at the checked constructor boundary.
 
-Public declarations used in layout discovery must be unconditional. The layout probe refuses
+Public declarations used in layout discovery must be unconditional. The identity scan refuses
 `#[cfg]` and `#[cfg_attr]` on public types, modules, and re-exports, naming the declaration.
 Keep target-specific implementation details private; publish an unconditional Wire representation.

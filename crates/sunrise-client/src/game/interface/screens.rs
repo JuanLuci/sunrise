@@ -60,10 +60,9 @@ impl Screen {
             | Self::GameModeSwitcher
             // SocialInteractionsScreen.isPauseScreen.
             | Self::Social
-            // No screen over the world, and Sunrise's own screens that
-            // draw over it (a native mod's screen and Studio) leave it
-            // running as they always have.
-            | Self::Playing | Self::Mod | Self::Studio
+            // No screen over the world, and a native mod's screen that draws
+            // over it, leave it running as they always have.
+            | Self::Playing | Self::Mod
             // WinScreen.isPauseScreen is `!poem`: Game::win_screen_pauses.
             | Self::Win => false,
             // Every other screen, and the game-master block editors
@@ -116,8 +115,7 @@ impl Screen {
             | Self::BlockEditor
             | Self::Mod
             // The HUD editor shows the HUD it moves.
-            | Self::HudEditor
-            | Self::Studio => false,
+            | Self::HudEditor => false,
             // WinScreen.extractBackground: the poem fills the screen with the End portal, the
             // credits alone blur. Game::menu_blur knows which one rolls.
             Self::Win => false,
@@ -1091,7 +1089,6 @@ mod tests {
             Screen::Social,
             Screen::Playing,
             Screen::Mod,
-            Screen::Studio,
             Screen::Win,
         ] {
             assert!(!screen.is_pause_screen(), "{}", screen.id());

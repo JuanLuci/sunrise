@@ -883,6 +883,93 @@ pub(crate) fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<Stri
     ))
 }
 
+/// What a place is to the boundary: its name, the import a mod that listens at it carries
+/// (`point:Points::<place>#<hash>`), and the id the game fires it by, all from the place's name
+/// and its point's signature, so none moves when another point is added. A listener's
+/// registration marks its place through `__point_mark!`.
+fn place_items(places: &[(String, String, mod_surface::call::Name)]) -> proc_macro2::TokenStream {
+    let mut ids = std::collections::BTreeMap::new();
+    for (variant, _, name) in places {
+        assert!(
+            ids.insert(name.point_id(), variant.clone()).is_none(),
+            "two point places have one id: {variant}"
+        );
+    }
+    assert!(
+        !ids.contains_key(&SUBSCRIPTIONS),
+        "a point place has the subscriptions id"
+    );
+    let variants: Vec<_> = places
+        .iter()
+        .map(|(variant, ..)| quote::format_ident!("{variant}"))
+        .collect();
+    let names: Vec<&str> = places.iter().map(|(_, name, _)| name.as_str()).collect();
+    let calls: Vec<String> = places.iter().map(|(.., name)| name.text()).collect();
+    let place_ids: Vec<u64> = places.iter().map(|(.., name)| name.point_id()).collect();
+    let mut sorted = calls.clone();
+    sorted.sort();
+    let by_id = ids.iter().map(|(id, variant)| {
+        let variant = quote::format_ident!("{variant}");
+        quote!((#id, PointId::#variant))
+    });
+    let marks = places.iter().map(|(_, name, call)| {
+        let call = call.text();
+        quote!((#name) => { #[cfg(target_arch = "wasm32")] { ::mod_api::__sunrise_import!(#call); } };)
+    });
+    let subscriptions = SUBSCRIPTIONS;
+    quote! {
+        /// The id a guest is asked by for the list of places it listens at.
+        #[doc(hidden)]
+        pub const SUBSCRIPTIONS: u64 = #subscriptions;
+        /// Every place's import name, sorted: what a module's table may name of points.
+        #[doc(hidden)]
+        pub const POINT_CALLS: &[&str] = &[#(#sorted),*];
+        /// Places by wire id, sorted by it.
+        #[doc(hidden)]
+        pub const PLACES_BY_ID: &[(u64, PointId)] = &[#(#by_id),*];
+        impl PointId {
+            /// The place's name, as a guest reports where it listens.
+            #[doc(hidden)]
+            pub const fn name(self) -> &'static str {
+                match self { #(PointId::#variants => #names,)* PointId::__Count => "" }
+            }
+            /// The id the game fires this place by.
+            #[doc(hidden)]
+            pub const fn id(self) -> u64 {
+                match self { #(PointId::#variants => #place_ids,)* PointId::__Count => 0 }
+            }
+            /// The place named `name`.
+            #[doc(hidden)]
+            pub fn named(name: &str) -> Option<PointId> {
+                match name { #(#names => Some(PointId::#variants),)* _ => None }
+            }
+            /// The place at `index` in the catalog, which is `Place::index`.
+            #[doc(hidden)]
+            pub fn from_index(index: usize) -> Option<PointId> {
+                const ALL: &[PointId] = &[#(PointId::#variants),*];
+                ALL.get(index).copied()
+            }
+            /// The place fired by `id`.
+            #[doc(hidden)]
+            pub fn by_id(id: u64) -> Option<PointId> {
+                PLACES_BY_ID.binary_search_by_key(&id, |(id, _)| *id).ok().map(|i| PLACES_BY_ID[i].1)
+            }
+        }
+        /// Marks that the module listens at a place: a no-op import named for the place, so the
+        /// module's import table lists exactly the places its listeners are linked at.
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! __point_mark {
+            #(#marks)*
+            ($other:literal) => {};
+        }
+    }
+}
+
+/// The id a guest is asked by for the places it listens at: the points' tag and the low 32 bits
+/// set, which no place's digest id is (the generator refuses one that is).
+const SUBSCRIPTIONS: u64 = mod_surface::call::POINT_TAG | 0xFFFF_FFFF;
+
 /// Platform `mod_points`: canonical engine-record re-exports, listener constructors
 /// and registration place ids. Typed dispatch is owned by `sunrise_engine_slots`.
 #[cfg(test)]
@@ -925,16 +1012,9 @@ pub(crate) fn records_selected(
         .collect();
     let mut api_places = proc_macro2::TokenStream::new();
     let mut api_refusals = proc_macro2::TokenStream::new();
-    let mut layout = 0xcbf29ce484222325u64;
+    // Each place's name as a mod's import table spells it, and its wire id.
+    let mut places: Vec<(String, String, mod_surface::call::Name)> = Vec::new();
     for point in points {
-        for byte in format!(
-            "{}:{}:{}:{}:{:?}",
-            point.name, point.host, point.record_item, point.at_return, point.api_refusal
-        )
-        .bytes()
-        {
-            layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
-        }
         if let Some(reason) = &point.api_refusal {
             let target = &point.target;
             api_refusals.extend(quote! { (#target, #reason), });
@@ -984,6 +1064,19 @@ pub(crate) fn records_selected(
             };
             api_places
                 .extend(quote! { (PointId::#variant, #target, #at_return, #replace_refusal), });
+            places.push((
+                variant.to_string(),
+                name.clone(),
+                mod_surface::call::Name {
+                    kind: mod_surface::call::Kind::Point,
+                    path: format!("Points::{name}"),
+                    version: None,
+                    hash: mod_surface::shape::digest(&format!(
+                        "point{{{};{at_return}}}",
+                        point.signature_hash
+                    )),
+                },
+            ));
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
@@ -997,14 +1090,13 @@ pub(crate) fn records_selected(
     })
     .expect("point variants");
     let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
+    let places_code = place_items(&places);
     quote! {
         #(#records)*
         /// Target names for native load diagnostics.
         #[doc(hidden)]
         pub const POINT_TARGETS: &[&str] = &[#(#targets),*];
-        /// The generated point export table and record layout, checked separately from the API layout.
-        #[doc(hidden)]
-        pub const POINT_LAYOUT: u64 = #layout;
+        #places_code
         /// API places as (place, target function, return phase, the return type a `replace` there
         /// can't produce), for manifest validation: a head whose return is neither `()` nor an
         /// API value refuses a replacement when a module loads.
@@ -1016,10 +1108,10 @@ pub(crate) fn records_selected(
         pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
-        pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
-            if id == 0xBFFF_FFFF { out.put(&crate::guest::subscriptions()); return Ok(()); }
-            let index = (id & 0x3FFF_FFFF) as usize;
-            let (place, function) = guest_exports::TABLE.get(index).copied().flatten().ok_or(::mod_api::wire::WireError::Tag(id))?;
+        pub fn guest_dispatch(id: u64, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
+            if id == SUBSCRIPTIONS { out.put(&crate::guest::subscriptions()); return Ok(()); }
+            let place = PointId::by_id(id).ok_or(::mod_api::wire::WireError::Tag(id as u32))?;
+            let (place, function) = guest_exports::TABLE.get(place as usize).copied().flatten().ok_or(::mod_api::wire::WireError::Tag(id as u32))?;
             function(place, input, out)
         }
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
@@ -1148,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_guest_exports_keep_the_full_layout() {
+    fn selected_guest_exports_keep_the_full_place_table() {
         let make = |name: &str| {
             let sig: syn::Signature = syn::parse_str(&format!("fn {name}()")).unwrap();
             let shape = point_shape::shape(quote!(), &sig).unwrap();
@@ -1184,7 +1276,7 @@ mod tests {
                 .items
                 .into_iter()
                 .find_map(|item| match item {
-                    syn::Item::Const(c) if c.ident == "POINT_LAYOUT" => {
+                    syn::Item::Const(c) if c.ident == "POINT_CALLS" => {
                         Some(c.expr.to_token_stream().to_string())
                     }
                     _ => None,

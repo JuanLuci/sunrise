@@ -528,8 +528,18 @@ impl Containers<'_> {
         }
         let held = self.get(view, slot);
         let is_bucket = |s: &ItemStack| &*s.item == "minecraft:bucket";
+        if let Some(container) = &view.container {
+            return sunrise_client::containers::mod_container_insert_allowed(
+                container
+                    .insert_rules
+                    .get(slot)
+                    .copied()
+                    .unwrap_or_default(),
+                held,
+                stack,
+            );
+        }
         match view.kind {
-            _ if view.container.is_some() => true,
             Kind::Jukebox | Kind::Bookshelf => held.is_none(),
             Kind::Brewing => slot >= 3 || held.is_none(),
             Kind::Furnace => slot != 1 || !is_bucket(stack) || !held.is_some_and(is_bucket),
@@ -2530,6 +2540,7 @@ mod mod_container_tests {
                 inputs: vec![0, 1],
                 outputs: vec![2],
                 menu: None,
+                insert_rules: Vec::new(),
             })),
         };
         assert_eq!(

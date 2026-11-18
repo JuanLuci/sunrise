@@ -11,6 +11,8 @@ The gameplay library re-exports the reusable API, keeping existing mod targets u
 Gameplay tests run in its library test target, separately from the reusable library's tests.
 There is no copy of gameplay in the executable's test target. Tools and probes depend only
 on the reusable library, so gameplay edits do not invalidate their builds.
+Gameplay is moving out of it (#2210): `sunrise-gameplay` takes the server side (vanilla's logical side) and
+`sunrise-client-gameplay` the client-only side, each module leaving a shim at its old path in `game/`.
 
 Paths: `L/` = `crates/sunrise-client/src/`, `G/` = `crates/sunrise-client/src/game/`, `W/` =
 `crates/sunrise-world/src/`, `K/` = `crates/sunrise-client-core/src/`, `C/` = `crates/sunrise-command/src/`,
@@ -55,7 +57,7 @@ command above to inspect the selection rather than relying on historical counts.
 | 26 | Crafting and the recipe book (59) | `L/crafting.rs`, `L/recipe_book.rs`, `L/recipe_book_screen.rs`, `G/recipe_book.rs`, `G/machines.rs`, `G/machines/crafter.rs` | recipe, recipe_book, recipe_book_view, place_recipe, ghost_recipe, crafter |
 | 27 | Vehicles and mounts (54) | `G/boats.rs`, `G/boat_passengers.rs`, `G/minecarts.rs`, `G/mounts.rs`, `G/mount_menu.rs`, `G/llamas.rs`, `G/passengers.rs` | server_entities, lan_e2e boats minecarts riding mounts |
 | 28 | Villagers, trading, raids (50) | `L/mobs/villager*.rs`, `L/merchant.rs`, `G/trading.rs`, `G/villagers.rs`, `L/raid.rs`, `G/raids.rs`, `L/gossip.rs` | trading, raid, mob_ai |
-| 29 | Title, worlds, startup (49) | `L/title.rs` + `L/title/`, `G/startup_menu.rs`, `R/title_edition.rs`, `G/loading_window.rs` (the first renderer, `start_game`), `G/resource_load.rs` (the startup resource load) | world_options; `cargo test -p sunrise-client --lib title` |
+| 29 | Title, worlds, startup (49) | `L/title.rs` + `L/title/`, `G/startup_menu.rs`, `G/loading_window.rs` (the first renderer, `start_game`), `G/resource_load.rs` (the startup resource load) | world_options; `cargo test -p sunrise-client --lib title` |
 | 30 | Dedicated server, sunrise-server (48) | `G/dedicated.rs`, `G/dedicated/status.rs`, `crates/sunrise-server/`, `crates/sunrise-server-files/` | dedicated_server, server_files, user_cache, online_mode, server_ops_feedback |
 | 31 | Particles and client effects (46) | `R/particles.rs`, `G/render_tick.rs`, `G/level_particles.rs`, `L/animate_tick.rs` | particle_providers, block_particles, entity_particles, emitter_particles, marker_particles |
 | 32 | Bosses and the End (45) | `G/dragon.rs`, `G/wither.rs`, `G/end.rs` | server_dragon, forced_end, end_podium, end_gateway |

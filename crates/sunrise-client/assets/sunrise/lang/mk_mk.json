@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Приказ",
   "sunrise.studio.topbar.view_short": "Приказ",
   "sunrise.studio.unknown_server": "Непознато",
-  "sunrise.tempban.dedicated_required": "Привремените банувања бараат посветен сервер",
-  "sunrise.tempban.invalid_duration": "%s не е времетраење: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Има %s привремени банувања:",
-  "sunrise.tempban.list.empty": "Нема привремени банувања",
-  "sunrise.tempban.list.entry": "%1$s беше бануван од %2$s %3$s (до %4$s)",
-  "sunrise.tempban.success": "%1$s за %2$s, до %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Не е поврзан со Mojang или Microsoft"
 }

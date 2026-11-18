@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Nānā",
   "sunrise.studio.topbar.view_short": "Nānā",
   "sunrise.studio.unknown_server": "ʻIke ʻole ʻia",
-  "sunrise.tempban.dedicated_required": "Pono nā pāpā manawa i kahi kikowaena kūʻokoʻa",
-  "sunrise.tempban.invalid_duration": "ʻAʻole ʻo %s he manawa: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "He %s pāpā manawa:",
-  "sunrise.tempban.list.empty": "ʻAʻohe pāpā manawa",
-  "sunrise.tempban.list.entry": "Ua pāpā ʻia ʻo %1$s e %2$s %3$s (a hiki i %4$s)",
-  "sunrise.tempban.success": "%1$s no %2$s, a hiki i %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "ʻAʻole pili me Mojang a i ʻole Microsoft"
 }

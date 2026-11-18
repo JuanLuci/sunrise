@@ -33,7 +33,13 @@ const MAX_BYTES: u64 = 1 << 20;
 
 /// Type fingerprints indexed by owning mod and fully qualified type name.
 #[derive(Clone, Debug, Default)]
-pub struct Layouts(BTreeMap<String, BTreeMap<String, String>>);
+pub struct Layouts {
+    types: BTreeMap<String, BTreeMap<String, String>>,
+    /// A file a build before 32-digit identities wrote: 16 hex digits per type. It is read so
+    /// that the package reaches its own refusal (an old wasm module is refused at load, an old
+    /// source folder is rebuilt), never trusted: its digests equal no current one.
+    legacy: bool,
+}
 
 impl Layouts {
     /// Validate untrusted package metadata once, with a bounded read.
@@ -49,26 +55,38 @@ impl Layouts {
         let parsed: Unique<Unique<String>> =
             serde_json::from_slice(&bytes).map_err(|e| format!("{FILE} is malformed: {e}"))?;
         let maps: BTreeMap<_, _> = parsed.0.into_iter().map(|(k, v)| (k, v.0)).collect();
+        let mut legacy = false;
         for (owner, types) in &maps {
             for (name, hash) in types {
-                if hash.len() != 16
-                    || !hash
-                        .bytes()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                {
-                    return Err(format!(
-                        "{FILE}: {owner} type {name}: expected 16 lowercase hex digits"
-                    ));
+                let hex = hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+                match hash.len() {
+                    32 if hex => {}
+                    16 if hex => legacy = true,
+                    _ => {
+                        return Err(format!(
+                            "{FILE}: {owner} type {name}: expected 32 lowercase hex digits"
+                        ));
+                    }
                 }
             }
         }
-        Ok(Self(maps))
+        Ok(Self {
+            types: maps,
+            legacy,
+        })
+    }
+
+    /// Whether this is a file of the 16-digit format: a build writes it again.
+    pub fn is_legacy(&self) -> bool {
+        self.legacy
     }
 
     /// First recorded library type whose layout changed, ordered by type name.
     pub fn first_difference<'a>(&'a self, library: &str, actual: &Self) -> Option<&'a str> {
-        self.0.get(library)?.iter().find_map(|(name, hash)| {
-            (actual.0.get(library).and_then(|types| types.get(name)) != Some(hash))
+        self.types.get(library)?.iter().find_map(|(name, hash)| {
+            (actual.types.get(library).and_then(|types| types.get(name)) != Some(hash))
                 .then_some(name.as_str())
         })
     }
@@ -78,14 +96,25 @@ impl Layouts {
 mod tests {
     use super::*;
     #[test]
+    fn the_old_sixteen_digit_format_is_read_as_legacy_and_equals_no_current_digest() {
+        let old = Layouts::read(&br#"{"lib":{"T":"0123456789abcdef"}}"#[..]).unwrap();
+        assert!(old.is_legacy());
+        let current =
+            Layouts::read(&br#"{"lib":{"T":"0123456789abcdef0123456789abcdef"}}"#[..]).unwrap();
+        assert!(!current.is_legacy());
+        assert_eq!(old.first_difference("lib", &current), Some("T"));
+    }
+
+    #[test]
     fn malformed_metadata_is_refused() {
         for bytes in [
             b"{".as_slice(),
             br#"{"lib":{},"lib":{}}"#,
-            br#"{"lib":{"T":"0123456789abcdef","T":"0123456789abcdef"}}"#,
+            br#"{"lib":{"T":"0123456789abcdef0123456789abcdef","T":"0123456789abcdef0123456789abcdef"}}"#,
             br#"{"lib":{"T":"ABCDEF0123456789"}}"#,
             br#"{"lib":{"T":12}}"#,
             br#"{"lib":{"T":"0123"}}"#,
+            br#"{"lib":{"T":"0123456789abcdeg"}}"#,
         ] {
             assert!(Layouts::read(bytes).unwrap_err().starts_with(FILE));
         }
@@ -159,15 +188,15 @@ mod edge_tests {
         }
     }
     fn check(native: bool, mismatch: bool) {
-        let dependent = package("addon", native, true, "0123456789abcdef");
+        let dependent = package("addon", native, true, "0123456789abcdef0123456789abcdef");
         let library = package(
             "lib",
             !native,
             false,
             if mismatch {
-                "1123456789abcdef"
+                "1123456789abcdef1123456789abcdef"
             } else {
-                "0123456789abcdef"
+                "0123456789abcdef0123456789abcdef"
             },
         );
         let reason = mixed_refusal(&dependent, &library).unwrap();
@@ -189,17 +218,17 @@ mod edge_tests {
     }
     #[test]
     fn same_target_and_undeclared_edges_are_not_mixed() {
-        let mut dependent = package("addon", true, true, "0123456789abcdef");
-        let library = package("lib", true, false, "1123456789abcdef");
+        let mut dependent = package("addon", true, true, "0123456789abcdef0123456789abcdef");
+        let library = package("lib", true, false, "1123456789abcdef1123456789abcdef");
         assert!(mixed_refusal(&dependent, &library).is_none());
         dependent.manifest.dependencies.clear();
-        let library = package("lib", false, false, "1123456789abcdef");
+        let library = package("lib", false, false, "1123456789abcdef1123456789abcdef");
         assert!(mixed_refusal(&dependent, &library).is_none());
     }
     #[test]
     fn absent_recordings_need_no_layout_check_but_missing_library_type_does() {
-        let mut dependent = package("addon", true, true, "0123456789abcdef");
-        let mut library = package("lib", false, false, "0123456789abcdef");
+        let mut dependent = package("addon", true, true, "0123456789abcdef0123456789abcdef");
+        let mut library = package("lib", false, false, "0123456789abcdef0123456789abcdef");
         library.layouts = Layouts::default();
         assert!(
             mixed_refusal(&dependent, &library)

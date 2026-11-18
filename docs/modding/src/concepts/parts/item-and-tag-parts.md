@@ -164,8 +164,8 @@ lookup.
   It is asked each client tick, for each hand, while the shown and held stacks differ; an empty hand isn't asked.
 - `ItemPart::should_cause_block_break_reset` is `IItemExtension.shouldCauseBlockBreakReset`: whether a break
   restarts because the main hand changed. `event.stack` is the stack the break began with and `event.held` the main
-  hand now. `event.reset` starts `true` when they aren't the same item with the same components (count and damage
-  left out). `false` keeps the break and its progress; `true` sends the abort and a new start, from 0. It is asked on
+  hand now. `event.reset` starts `true` when they aren't the same item with the same components (count left out, damage
+  compared). `false` keeps the break and its progress; `true` sends the abort and a new start, from 0. It is asked on
   each tick of a break of the same block, in single player and on a server's client. A `true` for an unchanged stack
   restarts the break every tick, so it never finishes.
 - `ItemPart::highlight_tip` is `IItemExtension.getHighlightTip`: the name drawn above the hotbar for the selected

@@ -408,6 +408,11 @@ impl FixedStep {
         let ticks = self.timer.advance_game_time(now_ms, |_| target_millis);
         ticks.clamp(0, 10) as u32
     }
+    /// A replacement ClientLevel starts with a fresh TickRateManager. Keep the window's timer.
+    pub fn reset_client_level_tick_state(&mut self) {
+        self.manager.base = TickRateManager::default();
+        self.manager.base.set_frozen(self.still);
+    }
     /// Restart pacing from now (after loading, so no backlog replays).
     pub fn reset(&mut self) {
         self.timer = Timer::new(20.0, self.now_ms());

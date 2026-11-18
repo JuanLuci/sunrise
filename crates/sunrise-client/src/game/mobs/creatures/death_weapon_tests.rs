@@ -330,15 +330,13 @@ fn wasm_weapon_dispatch(
       (@custom "dylink.0" "\01\04\00\00\00\00")
       (import "env" "memory" (memory 1))
       (import "env" "__indirect_function_table" (table 1 funcref))
-      (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-      (import "sunrise" "host_reply" (func (param i32)))
-      (func (export "sunrise_layout") (result i64) i64.const {layout})
+      {imports}
       (global $length (mut i32) (i32.const 0))
       (data (i32.const 4096) "{request}")
       (data (i32.const 32768) "{answer}")
       (func (export "sunrise_in") (param i32) (result i32)
         local.get 0 global.set $length i32.const 512)
-      (func (export "sunrise_hook") (param i32) (result i64)
+      (func (export "sunrise_hook") (param i64) (result i64)
         (local $start i32) (local $end i32) (local $i i32) (local $length i32)
         {check}
         (block $found (loop $search
@@ -354,7 +352,7 @@ fn wasm_weapon_dispatch(
         i32.const 49152 i32.const 0 i32.store
         i64.const 211106232532996)
     )"#,
-        layout = *mod_api::wire::LAYOUT,
+        imports = sunrise_mod_wasm::fixture::wat_imports(),
         request = escape(request.bytes()),
         answer = escape(answer.bytes()),
         answer_len = answer.bytes().len()

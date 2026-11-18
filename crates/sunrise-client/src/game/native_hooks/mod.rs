@@ -59,7 +59,6 @@ use mod_api::{
     CameraType, Despawn, Identifier, MobRef, PermissionLevel, RailShape, SoundPlay, SoundRef,
 };
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -89,7 +88,6 @@ use sunrise_client::{
     hud_layout::GuiDraw,
     items::ItemStack,
     keybinds,
-    lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::Who,
     mod_list::{self, Installed, KeyMapping, NativePage, NativeSetting, NativeSettingValue},

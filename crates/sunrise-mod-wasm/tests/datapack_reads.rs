@@ -14,7 +14,7 @@ impl Host for World {
     }
 }
 impl Backend for World {}
-mod_api::impl_backend_areas!(World, except(levels, keys));
+mod_api::impl_backend_areas!(World, except(level_datapacks, keys));
 impl mod_api::prelude::KeysBackend for World {
     fn registry_entry_key_slot(&self, entry: &RegistryEntry) -> Option<u32> {
         (entry.registry.to_string() == "minecraft:block"
@@ -56,7 +56,7 @@ impl mod_api::prelude::KeysHost for World {
             .tag_contains(&entry.registry.to_string(), &entry.id.to_string(), tag)
     }
 }
-impl mod_api::prelude::LevelsBackend for World {
+impl mod_api::prelude::LevelDatapacksBackend for World {
     fn level_datapack_entries(&self, _: LevelRef, registry: &str) -> Option<Vec<String>> {
         let mut calls = self.1.get();
         calls[0] += 1;

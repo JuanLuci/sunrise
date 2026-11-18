@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "نما",
   "sunrise.studio.topbar.view_short": "نما",
   "sunrise.studio.unknown_server": "ناشناخته",
-  "sunrise.tempban.dedicated_required": "بن موقت به سرور اختصاصی نیاز دارد",
-  "sunrise.tempban.invalid_duration": "%s یک مدت نیست: 30m، 12h، 7d",
-  "sunrise.tempban.list.count": "%s بن موقت وجود دارد:",
-  "sunrise.tempban.list.empty": "هیچ بن موقتی نیست",
-  "sunrise.tempban.list.entry": "%1$s توسط %2$s %3$s بن شد (تا %4$s)",
-  "sunrise.tempban.success": "%1$s برای %2$s، تا %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "به Mojang یا Microsoft وابسته نیست"
 }

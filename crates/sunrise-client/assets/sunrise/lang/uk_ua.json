@@ -1110,12 +1110,5 @@
   "sunrise.studio.topbar.view": "Вигляд",
   "sunrise.studio.topbar.view_short": "Вигляд",
   "sunrise.studio.unknown_server": "Невідомо",
-  "sunrise.tempban.dedicated_required": "Тимчасові бани потребують виділеного сервера",
-  "sunrise.tempban.invalid_duration": "%s — не тривалість: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Тимчасових банів: %s:",
-  "sunrise.tempban.list.empty": "Тимчасових банів немає",
-  "sunrise.tempban.list.entry": "%1$s забанено гравцем %2$s %3$s (до %4$s)",
-  "sunrise.tempban.success": "%1$s на %2$s, до %3$s",
-  "sunrise.tempban.usage": "/tempban <гравець> <тривалість> [причина]",
   "sunrise.title.not_affiliated": "Не пов’язано з Mojang чи Microsoft"
 }

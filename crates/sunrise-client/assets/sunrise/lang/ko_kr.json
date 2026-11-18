@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "보기",
   "sunrise.studio.topbar.view_short": "보기",
   "sunrise.studio.unknown_server": "알 수 없음",
-  "sunrise.tempban.dedicated_required": "임시 밴은 전용 서버에서만 사용할 수 있습니다",
-  "sunrise.tempban.invalid_duration": "%s은(는) 기간이 아닙니다: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "임시 밴 %s건:",
-  "sunrise.tempban.list.empty": "임시 밴이 없습니다",
-  "sunrise.tempban.list.entry": "%1$s이(가) %2$s에 의해 %3$s 밴되었습니다 (%4$s까지)",
-  "sunrise.tempban.success": "%1$s을(를) %2$s 동안 밴했습니다 (%3$s까지)",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Mojang 또는 Microsoft와 제휴 관계가 아님"
 }

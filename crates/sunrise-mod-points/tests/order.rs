@@ -38,7 +38,7 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
     fn native() {}
     struct Endpoint;
     impl Forward for Endpoint {
-        fn forward(&self, _: u32, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
+        fn forward(&self, _: u64, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
     }
     static ENDPOINT: Endpoint = Endpoint;
     for row in &rows {

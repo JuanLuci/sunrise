@@ -259,7 +259,11 @@ fn the_text_background_opacity_sets_the_backdrop_and_the_faded_text() {
 fn glyphs_of_a_label_refused_for_capacity_still_upload() {
     with_client_game(|game| {
         face_south(game);
-        // Runic letters: drawn nowhere else, so laying them out rasterizes them.
+        // The default font's runes are already packed bitmap glyphs, not runtime
+        // uploads. Force Unifont and an empty per-game cache so this layout must
+        // rasterize them, independently of any text drawn during game setup.
+        game.gui.atlas.font.uniform = true;
+        game.gui.atlas.font.reset_cache();
         let text = Text::literal("\u{16A0}\u{16A2}\u{16A6}");
         let at = [0.5, 70.0, 0.5];
         let options = NameTagOptions::new(false, true, 0xF0);

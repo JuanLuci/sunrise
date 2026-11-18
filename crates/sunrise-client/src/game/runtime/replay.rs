@@ -558,7 +558,6 @@ impl Game<'_> {
                 }
                 _ => Ok(Some(json!({ "error": "unknown studio replay subcommand" }))),
             },
-            Some("screen") if super::studio::EDITOR => self.studio_screen_control(words),
             _ => Ok(Some(json!({ "error": "unknown studio command" }))),
         }
     }

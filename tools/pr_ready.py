@@ -13,9 +13,8 @@ mods, plus the server build when sunrise-client is affected); the tests of the t
 CI's workspace-wide run gives them; the launcher (its own workspace) the same way when CI's launcher job would run
 (tools/ci/rust_changes.py --launcher); crates/sunrise-theme/tokens.css against sunrise-theme; Cargo.lock changing
 only with a Cargo.toml; the Python tests (always, as in CI) and the public-tree check; and the vanilla harnesses the
-changes can affect, picked as CI's parity job picks them (tools/parity.py --changed). As in CI (parity-scope in
-.github/workflows/ci.yml), the harnesses run only when the branch changes a harness, an oracle, a probe or the
-runner; otherwise they are listed and left to parity-main, which runs them on main. --harnesses runs them anyway.
+changes can affect (tools/parity.py --changed). Locally, the harnesses run only when the branch changes a
+harness, an oracle, a probe or the runner; otherwise they are listed and left to the daily on main. --harnesses runs them anyway.
 Harnesses run where the vanilla data is (a prepared .local/ here, or the Mac mini); elsewhere they are listed for CI.
 Tests select library, binary and integration targets explicitly, followed by doc tests, so unrelated example
 executables are not built and linked again.
@@ -164,8 +163,8 @@ def suggested_label(paths, exporter_paths=frozenset()):
     return "`skip-release`"
 
 
-# CI's parity-scope (.github/workflows/ci.yml): a pull request runs its harnesses itself only when it changes a
-# harness, an oracle, a probe or the runner. parity-main runs the others on main, a batch of merges at a time.
+# The local self-check runs harnesses when the branch changes a harness, oracle, probe or the runner.
+# CI runs parity only in the daily on main's head.
 PARITY_SCOPE = re.compile(
     r"^(tools/test_[a-z0-9_]+_parity\.py|tools/(parity[a-z_]*|lab)\.py|tools/parity_hosts\.json|mods/sunrise/src/test/"
     r"|crates/[^/]+/examples/|crates/sunrise-client/src/game/[a-z_]*(fixture|harness)\.rs"
@@ -173,7 +172,7 @@ PARITY_SCOPE = re.compile(
 
 
 def runs_parity(changed):
-    """Whether CI's parity job would run for a pull request that changes these files."""
+    """Whether the local self-check runs harnesses for a branch changing these files."""
     return any(PARITY_SCOPE.match(path) for path in changed)
 
 
@@ -443,15 +442,15 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
     local_data = (ROOT / ".local" / "minecraft").exists() and (ROOT / ".local" / "sunrise-client").exists()
     in_scope = args.harnesses or runs_parity(changed)
     if not args.quick and not in_scope:
-        # What CI does with this pull request: nothing here, parity-main on main.
+        # What CI does with this pull request: nothing here, the daily on main.
         harness.status = "list"
         why = "no harness, oracle, probe or runner change; --harnesses runs them here"
         if affected is None:
-            harness.detail = f"not run ({why}): parity-main checks this on main"
+            harness.detail = f"not run ({why}): the daily checks this on main"
         elif not affected:
             harness.detail = "no harness affected"
         else:
-            harness.detail = f"{len(affected)} affected, left to parity-main on main ({why}): {short_list(affected)}"
+            harness.detail = f"{len(affected)} affected, left to the daily on main ({why}): {short_list(affected)}"
     elif args.quick or (args.host == "local" and not local_data) or (args.host != "local" and args.host not in HARNESS_SETUP):
         harness.status = "list"
         why = "--quick" if args.quick else "no vanilla data here"

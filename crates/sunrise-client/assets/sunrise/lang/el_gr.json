@@ -1017,12 +1017,5 @@
   "sunrise.studio.topbar.view": "Προβολή",
   "sunrise.studio.topbar.view_short": "Προβολή",
   "sunrise.studio.unknown_server": "Άγνωστος",
-  "sunrise.tempban.dedicated_required": "Οι προσωρινοί αποκλεισμοί χρειάζονται αποκλειστικό διακομιστή",
-  "sunrise.tempban.invalid_duration": "Το %s δεν είναι διάρκεια: 30m, 12h, 7d",
-  "sunrise.tempban.list.count": "Υπάρχουν %s προσωρινοί αποκλεισμοί:",
-  "sunrise.tempban.list.empty": "Δεν υπάρχουν προσωρινοί αποκλεισμοί",
-  "sunrise.tempban.list.entry": "Ο %1$s αποκλείστηκε από τον %2$s %3$s (έως %4$s)",
-  "sunrise.tempban.success": "%1$s για %2$s, έως %3$s",
-  "sunrise.tempban.usage": "/tempban <player> <duration> [reason]",
   "sunrise.title.not_affiliated": "Δεν συνδέεται με τη Mojang ή τη Microsoft"
 }

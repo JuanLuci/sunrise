@@ -421,10 +421,7 @@ impl<T: 'static> Group<T> {
             for (name, extern_) in exports {
                 if layout.private_exports.contains(&name)
                     || name.starts_with("__wasm_")
-                    || matches!(
-                        name.as_str(),
-                        "sunrise_layout" | "sunrise_layout_ext" | "sunrise_in" | "sunrise_hook"
-                    )
+                    || matches!(name.as_str(), "sunrise_in" | "sunrise_hook")
                     || crate::boundary::PREPARED_EXPORTS
                         .iter()
                         .any(|(_, entries)| entries.iter().any(|(entry, _)| *entry == name))

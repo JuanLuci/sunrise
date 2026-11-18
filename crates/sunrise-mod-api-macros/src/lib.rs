@@ -184,6 +184,16 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let id = format_ident!("HookId");
     let ids = format_ident!("hook_ids");
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
+    // The impl is a use of every export it overrides, and of the one that lists them: each is
+    // marked by a no-op import named for it, kept exactly while this impl is linked. A method
+    // the API keeps off wasm has no marker.
+    let owner = proc_macro2::Literal::string(&name.to_string());
+    let marks = {
+        let marked = methods.iter().zip(&cfgs).map(|(method, cfgs)| {
+            quote! { #(#cfgs)* mod_api::__sunrise_mark!(#owner #method); }
+        });
+        quote! { #(#marked)* mod_api::__sunrise_mark!(#owner #subscribed_name); }
+    };
     // Entity parts (#1077) carry plain methods beside their scoped hooks
     // (#792): the goal, behavior and spawn-size registrars are not hooks, so
     // their names subscribe nothing.
@@ -213,6 +223,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
             .collect();
         implementation.items.push(syn::parse_quote! {
             fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                #marks
                 &[#(#(#hooked_cfgs)* mod_api::#ids::#hooked),*]
             }
         });
@@ -237,6 +248,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let subscribed = {
         syn::parse_quote! {
             fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                #marks
                 &[#(#(#cfgs)* mod_api::#ids::#methods),*]
             }
         }

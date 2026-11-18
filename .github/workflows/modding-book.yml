@@ -22,9 +22,10 @@ jobs:
   book:
     # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Dyna's runners while the repository's switch is on: a pull request's book on the small one, main's (which also
-    # builds the API docs and tests the examples) on the medium one.
-    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'pull_request' && 'dyna-small' || 'dyna-medium') || 'ubuntu-latest' }}
+    # Main's (which also builds the API docs and tests the examples) on Dyna's medium runner while the repository's
+    # switch is on; a pull request's on GitHub's, as DCO: nothing gates on it, and Dyna's runners are counted and kept
+    # for the gates (dco.yml says what it measured).
+    runs-on: ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && github.event_name != 'pull_request' && 'dyna-medium' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # Inert until the modding book exists on the branch.

@@ -44,7 +44,37 @@ impl Game<'_> {
                 sets.insert(key.to_owned(), items);
             }
         }
-        Arc::make_mut(&mut self.loop_context).set_recipe_properties(Arc::new(sets));
+        let tags = self.native_tag_items().and_then(|items| {
+            // A packet can install other registries without supplying any item tags.
+            if self.options.execution_role.is_client() && !self.remote.as_ref()?.has_item_tags {
+                return None;
+            }
+            // Match the registry that binds ItemKeys, not the raw pack entries: absent
+            // optional names must not count as members or leave gaps in their indices.
+            let registry: HashSet<&str> = self
+                .items()
+                .registry_order
+                .iter()
+                .map(AsRef::as_ref)
+                .collect();
+            Some(
+                items
+                    .item_tag_order
+                    .iter()
+                    .map(|(tag, members)| {
+                        let ordered = members
+                            .iter()
+                            .filter(|id| registry.contains(id.as_str()))
+                            .cloned()
+                            .collect();
+                        (tag.clone(), ordered)
+                    })
+                    .collect(),
+            )
+        });
+        let context = Arc::make_mut(&mut self.loop_context);
+        context.set_recipe_properties(Arc::new(sets));
+        context.set_item_tags(tags);
         if let Some(host) = self.lan.as_mut() {
             host.hub.loop_context = self.loop_context.clone();
         }

@@ -221,19 +221,17 @@ pub(in crate::game) fn wasm_answer<T: Wire>(
           (@custom "dylink.0" "\01\04\00\00\00\00")
           (import "env" "memory" (memory 1))
           (import "env" "__indirect_function_table" (table 1 funcref))
-          (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-          (import "sunrise" "host_reply" (func (param i32)))
-          (func (export "sunrise_layout") (result i64) i64.const {layout})
+          {imports}
           (data $input "{input}")
           (data (i32.const 16384) "{reply}")
           (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-          (func (export "sunrise_hook") (param i32) (result i64)
+          (func (export "sunrise_hook") (param i64) (result i64)
             i32.const {pages} memory.grow drop
             i32.const {input_at} i32.const 0 i32.const {input_len} memory.init $input
             i32.const {id} i32.const {input_at} i32.const {input_len} i32.const 32768 i32.const 8192 call $host drop
             {check}
             i64.const {reply_at}))"#,
-        layout = *mod_api::wire::LAYOUT,
+        imports = sunrise_mod_wasm::fixture::wat_imports(),
         // The input goes after the memory the group already has, grown to hold it: the first
         // page holds the reply and the answer.
         pages = 1 + input.bytes().len() / 65536,
